@@ -5,11 +5,11 @@
 - [x] 1.3 Create userspace library directory structure for device/context, PD, CQ, QP, MR, AH, work request posting, CQ polling, Doorbell helpers, and provider metadata.
 - [x] 1.4 Create Cocotb/Verilator verification directory structure for BFMs, host memory model, scoreboard, unit tests, integration tests, compliance tests, compatibility tests, coverage, and regression scripts.
 - [x] 1.5 Define shared constants and packed formats for WQE, CQE, QP context, CQ context, MR entry, AH entry, CSR commands, Doorbell payloads, opcodes, and completion statuses.
-- [ ] 1.6 Add top-level build targets for RTL lint, Verilator simulation, Cocotb tests, driver build, userspace library build, regression, and coverage reporting.
+- [x] 1.6 Add top-level build targets for RTL lint, Verilator simulation, Cocotb tests, driver build, userspace library build, regression, and coverage reporting.
 
 ## 2. PCIe Endpoint and Register Control Plane
 
-- [ ] 2.1 Implement PCIe endpoint wrapper interfaces for configuration, inbound TLP, outbound TLP, DMA request/completion, MSI-X, and function identity.
+- [x] 2.1 Implement PCIe endpoint wrapper interfaces for configuration, inbound TLP, outbound TLP, DMA request/completion, MSI-X, and function identity.
 - [ ] 2.2 Implement PCIe configuration space with Type 0 header and required PCIe/MSI-X/SR-IOV/AER/ATS capability structures.
 - [ ] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
 - [ ] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.

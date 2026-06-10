@@ -31,6 +31,18 @@ package smartnic_pkg;
     parameter int SGE_COUNT_W     = 8;    // 一个 WQE 引用的 SGE 数量位宽。
     parameter int CQ_VECTOR_W     = 12;   // MSI-X vector 索引位宽；支持 4096 个 vector。
     parameter int PAGE_SHIFT_W    = 6;    // 页大小 shift 编码位宽。
+    parameter int PCIE_TLP_DATA_W  = 256;  // PCIe TLP 流数据位宽，后续可按 FPGA IP 调整。
+    parameter int PCIE_TLP_KEEP_W  = PCIE_TLP_DATA_W / 32; // TLP 流 dword 有效掩码位宽。
+    parameter int PCIE_TLP_USER_W  = 32;   // TLP sideband/user 元数据位宽。
+    parameter int PCIE_BAR_W       = 3;    // PCIe BAR 编号位宽，覆盖 BAR0 到 BAR5。
+    parameter int PCIE_TAG_W       = 10;   // PCIe request tag 位宽，支持扩展 tag。
+    parameter int PCIE_REQ_ID_W    = 16;   // Requester/Completer ID 位宽：bus/device/function。
+    parameter int PCIE_CFG_ADDR_W  = 12;   // PCIe 配置空间 dword 地址位宽。
+    parameter int PCIE_CFG_DATA_W  = 32;   // PCIe 配置空间读写数据位宽。
+    parameter int PCIE_CFG_BE_W    = 4;    // PCIe 配置空间 byte enable 位宽。
+    parameter int PCIE_TLP_LEN_W   = 16;   // TLP payload 长度位宽，单位由接口约定定义。
+    parameter int PCIE_TC_W        = 3;    // PCIe Traffic Class 位宽。
+    parameter int PCIE_ATTR_W      = 3;    // PCIe attributes 位宽。
 
     parameter int WQE_BYTES       = 64;   // 硬件 WQE 大小，单位为字节。
     parameter int CQE_BYTES       = 64;   // 硬件 CQE 大小，单位为字节。
@@ -158,6 +170,26 @@ package smartnic_pkg;
         CQE_FLAG_IMM       = 4'h4, // immediate data 字段有效。
         CQE_FLAG_INV       = 4'h8  // invalidated rkey 字段有效。
     } cqe_flag_e;
+
+    // ---------------------------------------------------------------------
+    // PCIe wrapper 使用的基础枚举
+    // ---------------------------------------------------------------------
+
+    typedef enum logic [1:0] {
+        PCIE_CFG_RSP_OK      = 2'd0, // 配置访问成功。
+        PCIE_CFG_RSP_UR      = 2'd1, // Unsupported Request，访问不支持的配置寄存器。
+        PCIE_CFG_RSP_CRS     = 2'd2, // Configuration Retry Status，设备暂时未就绪。
+        PCIE_CFG_RSP_ERROR   = 2'd3  // 其他配置访问错误。
+    } pcie_cfg_status_e;
+
+    typedef enum logic [2:0] {
+        PCIE_TLP_MEM_READ    = 3'd0, // Memory Read 请求。
+        PCIE_TLP_MEM_WRITE   = 3'd1, // Memory Write 请求。
+        PCIE_TLP_CPL         = 3'd2, // Completion without data。
+        PCIE_TLP_CPLD        = 3'd3, // Completion with data。
+        PCIE_TLP_MSG         = 3'd4, // Message TLP，例如 MSI-X。
+        PCIE_TLP_OTHER       = 3'd7  // 其他/暂未分类 TLP。
+    } pcie_tlp_type_e;
 
     // ---------------------------------------------------------------------
     // Packed 数据结构
