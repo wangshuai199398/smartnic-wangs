@@ -10,7 +10,7 @@
 ## 2. PCIe Endpoint and Register Control Plane
 
 - [x] 2.1 Implement PCIe endpoint wrapper interfaces for configuration, inbound TLP, outbound TLP, DMA request/completion, MSI-X, and function identity.
-- [ ] 2.2 Implement PCIe configuration space with Type 0 header and required PCIe/MSI-X/SR-IOV/AER/ATS capability structures.
+- [x] 2.2 Implement PCIe configuration space with Type 0 header and required PCIe/MSI-X/SR-IOV/AER/ATS capability structures.
 - [ ] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
 - [ ] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.
 - [ ] 2.5 Implement MSI-X table, pending-bit array, vector masking, interrupt arbitration, and outbound MSI-X transaction generation.

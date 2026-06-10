@@ -44,6 +44,33 @@ package smartnic_pkg;
     parameter int PCIE_TC_W        = 3;    // PCIe Traffic Class 位宽。
     parameter int PCIE_ATTR_W      = 3;    // PCIe attributes 位宽。
 
+    parameter logic [15:0] SMARTNIC_VENDOR_ID    = 16'h1d0f; // 原型阶段使用的 Vendor ID，占位值。
+    parameter logic [15:0] SMARTNIC_DEVICE_ID    = 16'h5a10; // RDMA SmartNIC 原型 Device ID，占位值。
+    parameter logic [15:0] SMARTNIC_SUBSYS_ID    = 16'h0001; // 子系统 ID，占位值。
+    parameter logic [15:0] SMARTNIC_SUBSYS_VENDOR_ID = SMARTNIC_VENDOR_ID; // 子系统 Vendor ID。
+    parameter logic [7:0]  SMARTNIC_REVISION_ID  = 8'h01;   // 配置空间 revision ID。
+    parameter logic [23:0] SMARTNIC_CLASS_CODE   = 24'h020000; // 网络控制器 class code。
+
+    parameter int PCIE_BAR0_ID      = 0;     // BAR0：Doorbell aperture。
+    parameter int PCIE_BAR2_ID      = 2;     // BAR2：CSR/MMIO 空间。
+    parameter int PCIE_BAR4_ID      = 4;     // BAR4：MSI-X table/PBA 空间。
+    parameter logic [31:0] PCIE_BAR0_RESET = 32'h0000_000c; // 64-bit prefetchable memory BAR 占位属性。
+    parameter logic [31:0] PCIE_BAR2_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
+    parameter logic [31:0] PCIE_BAR4_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
+
+    parameter logic [7:0] PCIE_CAP_ID_PM    = 8'h01; // Power Management capability ID。
+    parameter logic [7:0] PCIE_CAP_ID_MSIX  = 8'h11; // MSI-X capability ID。
+    parameter logic [7:0] PCIE_CAP_ID_PCIE  = 8'h10; // PCI Express capability ID。
+    parameter logic [15:0] PCIE_EXT_CAP_ID_AER = 16'h0001; // AER extended capability ID。
+    parameter logic [15:0] PCIE_EXT_CAP_ID_ATS = 16'h000f; // ATS extended capability ID。
+    parameter logic [15:0] PCIE_EXT_CAP_ID_SRIOV = 16'h0010; // SR-IOV extended capability ID。
+
+    parameter logic [7:0] PCIE_CAP_PTR_PCIE  = 8'h40; // PCIe capability 起始 byte offset。
+    parameter logic [7:0] PCIE_CAP_PTR_MSIX  = 8'h60; // MSI-X capability 起始 byte offset。
+    parameter logic [11:0] PCIE_EXT_CAP_PTR_AER = 12'h100; // AER extended capability 起始 byte offset。
+    parameter logic [11:0] PCIE_EXT_CAP_PTR_ATS = 12'h140; // ATS extended capability 起始 byte offset。
+    parameter logic [11:0] PCIE_EXT_CAP_PTR_SRIOV = 12'h180; // SR-IOV extended capability 起始 byte offset。
+
     parameter int WQE_BYTES       = 64;   // 硬件 WQE 大小，单位为字节。
     parameter int CQE_BYTES       = 64;   // 硬件 CQE 大小，单位为字节。
     parameter int MAX_SGE         = 256;  // 单个 Work Request 支持的最大 SGE 数量。
