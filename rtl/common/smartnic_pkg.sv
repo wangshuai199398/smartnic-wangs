@@ -43,6 +43,9 @@ package smartnic_pkg;
     parameter int PCIE_TLP_LEN_W   = 16;   // TLP payload 长度位宽，单位由接口约定定义。
     parameter int PCIE_TC_W        = 3;    // PCIe Traffic Class 位宽。
     parameter int PCIE_ATTR_W      = 3;    // PCIe attributes 位宽。
+    parameter int PCIE_BAR_OFFSET_W = 32;  // BAR 内 offset 位宽。
+    parameter int PCIE_BAR_DATA_W   = 32;  // BAR 访问数据位宽，当前阶段按 dword 访问建模。
+    parameter int PCIE_BAR_BE_W     = 4;   // BAR 访问 byte enable 位宽。
 
     parameter logic [15:0] SMARTNIC_VENDOR_ID    = 16'h1d0f; // 原型阶段使用的 Vendor ID，占位值。
     parameter logic [15:0] SMARTNIC_DEVICE_ID    = 16'h5a10; // RDMA SmartNIC 原型 Device ID，占位值。
@@ -57,6 +60,37 @@ package smartnic_pkg;
     parameter logic [31:0] PCIE_BAR0_RESET = 32'h0000_000c; // 64-bit prefetchable memory BAR 占位属性。
     parameter logic [31:0] PCIE_BAR2_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
     parameter logic [31:0] PCIE_BAR4_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR0_SIZE = 32'h1000_0000; // BAR0 Doorbell aperture：256 MB。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR2_SIZE = 32'h0001_0000; // BAR2 CSR space：64 KB。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR4_SIZE = 32'h0000_4000; // BAR4 MSI-X table/PBA：16 KB。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_TABLE_OFFSET = 32'h0000_0000; // MSI-X table 起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_TABLE_SIZE = 32'h0000_0800; // MSI-X table 占位窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_PBA_OFFSET = 32'h0000_0800; // MSI-X PBA 起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_PBA_SIZE = 32'h0000_0800; // MSI-X PBA 占位窗口大小。
+    parameter int PCIE_MSIX_VECTOR_COUNT = 8; // 原型阶段 MSI-X vector 数量。
+    parameter int PCIE_MSIX_VECTOR_ID_W = 3; // 8 个 MSI-X vector 的索引位宽。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_ENTRY_SIZE = 32'h0000_0010; // MSI-X table entry 大小：16 字节。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_MODERATION_OFFSET = 32'h0000_1000; // 中断调节控制寄存器 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_MOD_TIMER_OFFSET = 32'h0000_1004; // moderation_timer 寄存器 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_MOD_COUNT_OFFSET = 32'h0000_1008; // moderation_count 寄存器 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_MODERATION_SIZE = 32'h0000_0010; // MSI-X 调节寄存器窗口大小。
+    parameter int PCIE_MSIX_CQ_VECTOR = 0; // CQ completion 默认使用的 vector。
+    parameter int PCIE_MSIX_ADMIN_VECTOR = 1; // admin/mailbox 默认使用的 vector。
+    parameter int PCIE_MSIX_ERROR_VECTOR = 2; // error event 默认使用的 vector。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MAILBOX_BASE = 32'h0000_0100; // BAR2 mailbox 起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MAILBOX_SIZE = 32'h0000_0100; // BAR2 mailbox 窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_COMMAND_ID_OFFSET = 32'h0000_0100; // command_id 寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_OWNER_FUNCTION_OFFSET = 32'h0000_0104; // owner_function 寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_CONTROL_OFFSET = 32'h0000_0108; // go/done/busy/error 控制寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_STATUS_OFFSET = 32'h0000_010c; // mailbox status 寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_ERROR_CODE_OFFSET = 32'h0000_0110; // mailbox error_code 寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_TIMEOUT_COUNTER_OFFSET = 32'h0000_0114; // timeout_counter 寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_ARG0_OFFSET = 32'h0000_0120; // arg0 参数寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_ARG1_OFFSET = 32'h0000_0124; // arg1 参数寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_ARG2_OFFSET = 32'h0000_0128; // arg2 参数寄存器。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MB_ARG3_OFFSET = 32'h0000_012c; // arg3 参数寄存器。
+    parameter logic [31:0] CSR_MB_TIMEOUT_LIMIT = 32'd1024; // mailbox BUSY 状态最大等待周期。
+    parameter logic [31:0] CSR_MB_MIN_BUSY_CYCLES = 32'd1; // 原型阶段命令最少 BUSY 周期。
 
     parameter logic [7:0] PCIE_CAP_ID_PM    = 8'h01; // Power Management capability ID。
     parameter logic [7:0] PCIE_CAP_ID_MSIX  = 8'h11; // MSI-X capability ID。
@@ -166,6 +200,29 @@ package smartnic_pkg;
         CSR_CMD_READ_STATS       = 16'h0900  // 读取统计计数器。
     } csr_cmd_e;
 
+    typedef enum logic [2:0] {
+        CSR_MB_STATE_IDLE  = 3'd0, // 等待软件写 command_id 和参数。
+        CSR_MB_STATE_GO    = 3'd1, // 软件写 go=1，命令刚被提交。
+        CSR_MB_STATE_BUSY  = 3'd2, // 硬件已接受命令，正在处理。
+        CSR_MB_STATE_DONE  = 3'd3, // 命令完成，done=1。
+        CSR_MB_STATE_ERROR = 3'd4  // 非法命令、超时或非法访问。
+    } csr_mailbox_state_e;
+
+    typedef enum logic [7:0] {
+        CSR_MB_STATUS_IDLE    = 8'h00, // mailbox 空闲。
+        CSR_MB_STATUS_BUSY    = 8'h01, // mailbox 正在处理命令。
+        CSR_MB_STATUS_SUCCESS = 8'h02, // 命令成功完成。
+        CSR_MB_STATUS_FAILED  = 8'h03  // 命令失败。
+    } csr_mailbox_status_e;
+
+    typedef enum logic [15:0] {
+        CSR_MB_ERR_NONE        = 16'h0000, // 无错误。
+        CSR_MB_ERR_INVALID_CMD = 16'h0001, // command_id 不受当前阶段支持。
+        CSR_MB_ERR_TIMEOUT     = 16'h0002, // 命令 BUSY 时间超过 timeout limit。
+        CSR_MB_ERR_BUSY        = 16'h0003, // mailbox 忙时收到新的 go。
+        CSR_MB_ERR_BAD_OFFSET  = 16'h0004  // CSR mailbox offset 不受支持。
+    } csr_mailbox_error_e;
+
     // ---------------------------------------------------------------------
     // Doorbell 类型
     // ---------------------------------------------------------------------
@@ -217,6 +274,21 @@ package smartnic_pkg;
         PCIE_TLP_MSG         = 3'd4, // Message TLP，例如 MSI-X。
         PCIE_TLP_OTHER       = 3'd7  // 其他/暂未分类 TLP。
     } pcie_tlp_type_e;
+
+    typedef enum logic [2:0] {
+        PCIE_BAR_RSP_OK              = 3'd0, // BAR 访问已被接受并路由。
+        PCIE_BAR_RSP_UNSUPPORTED     = 3'd1, // 访问了未支持的 BAR。
+        PCIE_BAR_RSP_BAD_OFFSET      = 3'd2, // offset 超出该 BAR 的合法窗口。
+        PCIE_BAR_RSP_MISALIGNED      = 3'd3, // 当前阶段不支持非 dword 对齐访问。
+        PCIE_BAR_RSP_TARGET_ERROR    = 3'd4  // 下游目标报告错误，后续阶段使用。
+    } pcie_bar_rsp_status_e;
+
+    typedef struct packed {
+        logic [31:0]                  msg_addr_low;  // MSI-X message address 低 32 位。
+        logic [31:0]                  msg_addr_high; // MSI-X message address 高 32 位。
+        logic [31:0]                  msg_data;      // MSI-X message data。
+        logic [31:0]                  vector_ctrl;   // vector control，bit0 为 mask。
+    } msix_table_entry_t;
 
     // ---------------------------------------------------------------------
     // Packed 数据结构

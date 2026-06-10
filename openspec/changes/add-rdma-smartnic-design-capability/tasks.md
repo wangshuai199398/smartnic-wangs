@@ -11,9 +11,9 @@
 
 - [x] 2.1 Implement PCIe endpoint wrapper interfaces for configuration, inbound TLP, outbound TLP, DMA request/completion, MSI-X, and function identity.
 - [x] 2.2 Implement PCIe configuration space with Type 0 header and required PCIe/MSI-X/SR-IOV/AER/ATS capability structures.
-- [ ] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
-- [ ] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.
-- [ ] 2.5 Implement MSI-X table, pending-bit array, vector masking, interrupt arbitration, and outbound MSI-X transaction generation.
+- [x] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
+- [x] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.
+- [x] 2.5 Implement MSI-X table, pending-bit array, vector masking, interrupt arbitration, and outbound MSI-X transaction generation.
 - [ ] 2.6 Implement SR-IOV function identity plumbing and per-function access checks for CSR and Doorbell paths.
 - [ ] 2.7 Add PCIe endpoint unit tests for configuration reads, BAR routing, CSR command lifecycle, MSI-X masking, and VF access rejection.
 
