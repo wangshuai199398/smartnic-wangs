@@ -92,6 +92,16 @@ package smartnic_pkg;
     parameter logic [31:0] CSR_MB_TIMEOUT_LIMIT = 32'd1024; // mailbox BUSY 状态最大等待周期。
     parameter logic [31:0] CSR_MB_MIN_BUSY_CYCLES = 32'd1; // 原型阶段命令最少 BUSY 周期。
 
+    parameter int SRIOV_MAX_PF = 1; // 原型阶段只建模一个 PF。
+    parameter int SRIOV_MAX_VF = 8; // 原型阶段最多建模 8 个 VF。
+    parameter int SRIOV_FUNCTION_COUNT = SRIOV_MAX_PF + SRIOV_MAX_VF; // PF 与 VF 的 function 总数。
+    parameter logic [VF_ID_W-1:0] SRIOV_PF_FUNCTION_ID = '0; // PF 使用 function_id 0。
+    parameter logic [QP_ID_W-1:0] SRIOV_QP_WINDOW_SIZE = 24'd1024; // 每个 VF 默认 QP 资源窗口大小。
+    parameter logic [CQ_ID_W-1:0] SRIOV_CQ_WINDOW_SIZE = 24'd1024; // 每个 VF 默认 CQ 资源窗口大小。
+    parameter logic [MR_ID_W-1:0] SRIOV_MR_WINDOW_SIZE = 24'd1024; // 每个 VF 默认 MR 资源窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] SRIOV_DOORBELL_WINDOW_SIZE = 32'h0100_0000; // 每个 VF 默认 Doorbell aperture 大小。
+    parameter logic [CQ_VECTOR_W-1:0] SRIOV_MSIX_VECTOR_WINDOW_SIZE = 12'd1; // 每个 VF 默认 MSI-X vector 配额。
+
     parameter logic [7:0] PCIE_CAP_ID_PM    = 8'h01; // Power Management capability ID。
     parameter logic [7:0] PCIE_CAP_ID_MSIX  = 8'h11; // MSI-X capability ID。
     parameter logic [7:0] PCIE_CAP_ID_PCIE  = 8'h10; // PCI Express capability ID。
@@ -283,12 +293,53 @@ package smartnic_pkg;
         PCIE_BAR_RSP_TARGET_ERROR    = 3'd4  // 下游目标报告错误，后续阶段使用。
     } pcie_bar_rsp_status_e;
 
+    typedef enum logic [3:0] {
+        SRIOV_ACCESS_BAR0_DOORBELL = 4'd0, // 检查 BAR0 Doorbell aperture 访问。
+        SRIOV_ACCESS_BAR2_CSR      = 4'd1, // 检查 BAR2 CSR/mailbox 访问。
+        SRIOV_ACCESS_BAR4_MSIX     = 4'd2, // 检查 BAR4 MSI-X table/PBA 访问。
+        SRIOV_ACCESS_QP            = 4'd3, // 检查 QP 编号是否属于该 function。
+        SRIOV_ACCESS_CQ            = 4'd4, // 检查 CQ 编号是否属于该 function。
+        SRIOV_ACCESS_MR            = 4'd5  // 检查 MR 编号是否属于该 function。
+    } sriov_access_type_e;
+
+    typedef enum logic [3:0] {
+        SRIOV_ACCESS_OK           = 4'd0, // 访问通过。
+        SRIOV_ACCESS_DENIED       = 4'd1, // 访问被权限策略拒绝。
+        SRIOV_ACCESS_DISABLED     = 4'd2, // 目标 function 未启用。
+        SRIOV_ACCESS_BAD_FUNCTION = 4'd3, // function_id 或 requester_id 无法映射到合法 function。
+        SRIOV_ACCESS_OUT_OF_RANGE = 4'd4, // 资源 ID、BAR offset 或 vector 超出该 function 窗口。
+        SRIOV_ACCESS_PF_ONLY      = 4'd5  // 当前访问只允许 PF 或 trusted function。
+    } sriov_access_status_e;
+
     typedef struct packed {
         logic [31:0]                  msg_addr_low;  // MSI-X message address 低 32 位。
         logic [31:0]                  msg_addr_high; // MSI-X message address 高 32 位。
         logic [31:0]                  msg_data;      // MSI-X message data。
         logic [31:0]                  vector_ctrl;   // vector control，bit0 为 mask。
     } msix_table_entry_t;
+
+    typedef struct packed {
+        logic                         is_pf;         // 1 表示 PF，0 表示 VF。
+        logic [7:0]                   pf_id;         // PF 编号；原型阶段固定为 0。
+        logic [VF_ID_W-1:0]           vf_id;         // VF 编号；PF 访问时为 0。
+        logic [VF_ID_W-1:0]           function_id;   // 统一 function ID：PF=0，VF 从 1 开始。
+        logic [PCIE_REQ_ID_W-1:0]     requester_id;  // PCIe requester ID，用于从 TLP 反查 function。
+        logic                         enabled;       // 该 function 是否允许发起访问。
+        logic                         trusted;       // 该 function 是否允许执行受信控制面操作。
+    } sriov_function_identity_t;
+
+    typedef struct packed {
+        logic [QP_ID_W-1:0]           qp_base;       // 该 function 可访问的第一个 QP 编号。
+        logic [QP_ID_W-1:0]           qp_limit;      // 该 function 可访问的最后一个 QP 编号，包含该值。
+        logic [CQ_ID_W-1:0]           cq_base;       // 该 function 可访问的第一个 CQ 编号。
+        logic [CQ_ID_W-1:0]           cq_limit;      // 该 function 可访问的最后一个 CQ 编号，包含该值。
+        logic [MR_ID_W-1:0]           mr_base;       // 该 function 可访问的第一个 MR handle。
+        logic [MR_ID_W-1:0]           mr_limit;      // 该 function 可访问的最后一个 MR handle，包含该值。
+        logic [PCIE_BAR_OFFSET_W-1:0] doorbell_base; // 该 function 的 BAR0 Doorbell 起始 offset。
+        logic [PCIE_BAR_OFFSET_W-1:0] doorbell_limit;// 该 function 的 BAR0 Doorbell 结束 offset，包含该值。
+        logic [CQ_VECTOR_W-1:0]       msix_vector_base;  // 该 function 可使用的第一个 MSI-X vector。
+        logic [CQ_VECTOR_W-1:0]       msix_vector_limit; // 该 function 可使用的最后一个 MSI-X vector，包含该值。
+    } sriov_resource_window_t;
 
     // ---------------------------------------------------------------------
     // Packed 数据结构

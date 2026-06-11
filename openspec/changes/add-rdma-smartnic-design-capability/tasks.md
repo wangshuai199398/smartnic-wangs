@@ -14,8 +14,8 @@
 - [x] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
 - [x] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.
 - [x] 2.5 Implement MSI-X table, pending-bit array, vector masking, interrupt arbitration, and outbound MSI-X transaction generation.
-- [ ] 2.6 Implement SR-IOV function identity plumbing and per-function access checks for CSR and Doorbell paths.
-- [ ] 2.7 Add PCIe endpoint unit tests for configuration reads, BAR routing, CSR command lifecycle, MSI-X masking, and VF access rejection.
+- [x] 2.6 Implement SR-IOV function identity plumbing and per-function access checks for CSR and Doorbell paths.
+- [x] 2.7 Add PCIe endpoint unit tests for configuration reads, BAR routing, CSR command lifecycle, MSI-X masking, and VF access rejection.
 
 ## 3. Doorbell and Queue Submission Path
 

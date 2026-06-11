@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb driver userspace regression coverage clean
+.PHONY: all lint verilator cocotb pcie-test driver userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -13,7 +13,12 @@ verilator:
 	@echo "[verilator] Verilator 仿真构建占位：后续会编译 smartnic_top 和模块级测试平台。"
 
 cocotb:
-	@echo "[cocotb] Cocotb 测试占位：后续会运行 verif/cocotb 下的 Python 测试。"
+	@echo "[cocotb] 运行 Cocotb PCIe 控制面单元测试入口。"
+	@$(MAKE) -C sim/cocotb pcie-control-plane-tests
+
+pcie-test:
+	@echo "[pcie-test] 运行 PCIe endpoint/control-plane 模块级测试入口。"
+	@$(MAKE) -C sim/cocotb pcie-control-plane-tests
 
 driver:
 	@echo "[driver] 进入 Linux driver 子目录。"
@@ -33,4 +38,5 @@ clean:
 	@echo "[clean] 清理构建产物占位。"
 	@$(MAKE) -C drivers/linux clean
 	@$(MAKE) -C lib/libsmartnic clean
+	@$(MAKE) -C sim/cocotb clean
 	@rm -rf build coverage .pytest_cache
