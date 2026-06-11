@@ -19,8 +19,8 @@
 
 ## 3. Doorbell and Queue Submission Path
 
-- [ ] 3.1 Implement Doorbell address decoder that maps BAR0 offsets to QP SQ, QP RQ, and CQ arm operations.
-- [ ] 3.2 Implement per-function Doorbell aperture checks for PF and VF ownership.
+- [x] 3.1 Implement Doorbell address decoder that maps BAR0 offsets to QP SQ, QP RQ, and CQ arm operations.
+- [x] 3.2 Implement per-function Doorbell aperture checks for PF and VF ownership.
 - [ ] 3.3 Implement SQ Doorbell payload parsing and QP producer index update.
 - [ ] 3.4 Implement RQ Doorbell payload parsing and QP producer index update.
 - [ ] 3.5 Implement CQ arm Doorbell parsing with consumer index and solicited-only flag.

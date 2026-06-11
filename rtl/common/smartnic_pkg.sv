@@ -61,6 +61,14 @@ package smartnic_pkg;
     parameter logic [31:0] PCIE_BAR2_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
     parameter logic [31:0] PCIE_BAR4_RESET = 32'h0000_0000; // 32-bit memory BAR 占位属性。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR0_SIZE = 32'h1000_0000; // BAR0 Doorbell aperture：256 MB。
+
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_PAGE_SIZE = 32'h0000_1000; // 单个 QP/CQ Doorbell page 大小：4 KiB。
+    parameter int DB_PAGE_SHIFT = 12; // Doorbell page offset 到资源编号的 shift。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_SQ_OFFSET = 32'h0000_0000; // page 内 SQ Doorbell offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_RQ_OFFSET = 32'h0000_0008; // page 内 RQ Doorbell offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_CQ_ARM_OFFSET = 32'h0000_0010; // page 内 CQ arm Doorbell offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_DOORBELL_STRIDE = 32'h0000_0008; // 当前阶段 Doorbell dword 间隔。
+
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR2_SIZE = 32'h0001_0000; // BAR2 CSR space：64 KB。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR4_SIZE = 32'h0000_4000; // BAR4 MSI-X table/PBA：16 KB。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_MSIX_TABLE_OFFSET = 32'h0000_0000; // MSI-X table 起始 offset。
