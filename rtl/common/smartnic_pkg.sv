@@ -68,6 +68,11 @@ package smartnic_pkg;
     parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_RQ_OFFSET = 32'h0000_0008; // page 内 RQ Doorbell offset。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_CQ_ARM_OFFSET = 32'h0000_0010; // page 内 CQ arm Doorbell offset。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] DB_DOORBELL_STRIDE = 32'h0000_0008; // 当前阶段 Doorbell dword 间隔。
+    parameter int DB_SEQUENCE_W = 8; // Doorbell sequence 位宽，用于调试/乱序检测预留。
+    parameter int DB_FLAGS_W = 8; // Doorbell flags 位宽。
+    parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAG_SIGNAL = 8'h01; // SQ Doorbell 请求 signaled completion 的提示位。
+    parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAG_FENCE = 8'h02; // SQ Doorbell 携带 fence 语义的提示位。
+    parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAGS_ALLOWED = SQ_DB_FLAG_SIGNAL | SQ_DB_FLAG_FENCE; // 当前阶段允许的软件 flags。
 
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR2_SIZE = 32'h0001_0000; // BAR2 CSR space：64 KB。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR4_SIZE = 32'h0000_4000; // BAR4 MSI-X table/PBA：16 KB。
@@ -251,6 +256,14 @@ package smartnic_pkg;
         DB_TYPE_RQ     = 4'd2, // Receive Queue producer 更新。
         DB_TYPE_CQ_ARM = 4'd3  // Completion Queue arm/update。
     } doorbell_type_e;
+
+    typedef enum logic [3:0] {
+        DB_ERR_NONE          = 4'd0, // Doorbell 处理成功。
+        DB_ERR_NOT_SQ        = 4'd1, // 当前模块只接受 SQ Doorbell。
+        DB_ERR_ACCESS_DENIED = 4'd2, // PF/VF 权限检查失败。
+        DB_ERR_INVALID_QPN   = 4'd3, // QPN 不存在或 QP 上下文无效。
+        DB_ERR_BAD_PAYLOAD   = 4'd4  // payload 格式或 flags 不合法。
+    } doorbell_error_e;
 
     // ---------------------------------------------------------------------
     // 访问权限标志和 CQ 标志
@@ -468,6 +481,12 @@ package smartnic_pkg;
         logic [QUEUE_IDX_W-1:0]     consumer_idx;   // CQ arm 使用的 consumer index 快照。
         logic                       solicited_only; // CQ arm 是否只对 solicited CQE 触发。
     } doorbell_t;
+
+    typedef struct packed {
+        logic [DB_FLAGS_W-1:0]       flags;                  // SQ Doorbell flags，当前支持 signal/fence 占位。
+        logic [DB_SEQUENCE_W-1:0]    doorbell_sequence;      // 软件递增的 Doorbell sequence，便于后续调试/乱序检测。
+        logic [QUEUE_IDX_W-1:0]      new_sq_producer_index;  // 软件写入的新 SQ producer index。
+    } sq_doorbell_payload_t;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
