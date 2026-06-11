@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-sq-doorbell clean
+.PHONY: pcie-control-plane-tests doorbell-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -31,6 +31,8 @@ doorbell-tests:
 		echo "[cocotb] 未安装 Verilator，跳过 Doorbell 单元测试。"; \
 	else \
 		$(MAKE) test-sq-doorbell; \
+		$(MAKE) test-rq-doorbell; \
+		$(MAKE) test-cq-arm-doorbell; \
 	fi
 
 test-pcie-cfg:
@@ -61,6 +63,16 @@ test-sriov:
 test-sq-doorbell:
 	$(MAKE) TOPLEVEL=sq_doorbell_handler MODULE=test_sq_doorbell \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/sq_doorbell_handler.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-rq-doorbell:
+	$(MAKE) TOPLEVEL=rq_doorbell_handler MODULE=test_rq_doorbell \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/rq_doorbell_handler.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cq-arm-doorbell:
+	$(MAKE) TOPLEVEL=cq_arm_doorbell_handler MODULE=test_cq_arm_doorbell \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/cq_arm_doorbell_handler.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

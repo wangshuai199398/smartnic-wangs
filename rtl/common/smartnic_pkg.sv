@@ -73,6 +73,10 @@ package smartnic_pkg;
     parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAG_SIGNAL = 8'h01; // SQ Doorbell 请求 signaled completion 的提示位。
     parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAG_FENCE = 8'h02; // SQ Doorbell 携带 fence 语义的提示位。
     parameter logic [DB_FLAGS_W-1:0] SQ_DB_FLAGS_ALLOWED = SQ_DB_FLAG_SIGNAL | SQ_DB_FLAG_FENCE; // 当前阶段允许的软件 flags。
+    parameter logic [DB_FLAGS_W-1:0] RQ_DB_FLAG_SOLICITED = 8'h01; // RQ Doorbell 提示后续接收 completion 可携带 solicited 语义。
+    parameter logic [DB_FLAGS_W-1:0] RQ_DB_FLAGS_ALLOWED = RQ_DB_FLAG_SOLICITED; // 当前阶段允许的 RQ Doorbell flags。
+    parameter logic [DB_FLAGS_W-1:0] CQ_ARM_DB_FLAG_SOLICITED_ONLY = 8'h01; // CQ arm 只允许 solicited CQE 触发通知。
+    parameter logic [DB_FLAGS_W-1:0] CQ_ARM_DB_FLAGS_ALLOWED = CQ_ARM_DB_FLAG_SOLICITED_ONLY; // 当前阶段允许的 CQ arm flags。
 
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR2_SIZE = 32'h0001_0000; // BAR2 CSR space：64 KB。
     parameter logic [PCIE_BAR_OFFSET_W-1:0] PCIE_BAR4_SIZE = 32'h0000_4000; // BAR4 MSI-X table/PBA：16 KB。
@@ -262,7 +266,10 @@ package smartnic_pkg;
         DB_ERR_NOT_SQ        = 4'd1, // 当前模块只接受 SQ Doorbell。
         DB_ERR_ACCESS_DENIED = 4'd2, // PF/VF 权限检查失败。
         DB_ERR_INVALID_QPN   = 4'd3, // QPN 不存在或 QP 上下文无效。
-        DB_ERR_BAD_PAYLOAD   = 4'd4  // payload 格式或 flags 不合法。
+        DB_ERR_BAD_PAYLOAD   = 4'd4, // payload 格式或 flags 不合法。
+        DB_ERR_NOT_RQ        = 4'd5, // 当前模块只接受 RQ Doorbell。
+        DB_ERR_NOT_CQ_ARM    = 4'd6, // 当前模块只接受 CQ arm Doorbell。
+        DB_ERR_INVALID_CQN   = 4'd7  // CQN 不存在或 CQ 上下文无效。
     } doorbell_error_e;
 
     // ---------------------------------------------------------------------
@@ -487,6 +494,18 @@ package smartnic_pkg;
         logic [DB_SEQUENCE_W-1:0]    doorbell_sequence;      // 软件递增的 Doorbell sequence，便于后续调试/乱序检测。
         logic [QUEUE_IDX_W-1:0]      new_sq_producer_index;  // 软件写入的新 SQ producer index。
     } sq_doorbell_payload_t;
+
+    typedef struct packed {
+        logic [DB_FLAGS_W-1:0]       flags;                  // RQ Doorbell flags，当前支持 solicited 占位。
+        logic [DB_SEQUENCE_W-1:0]    doorbell_sequence;      // 软件递增的 Doorbell sequence，便于后续调试/乱序检测。
+        logic [QUEUE_IDX_W-1:0]      new_rq_producer_index;  // 软件写入的新 RQ producer index。
+    } rq_doorbell_payload_t;
+
+    typedef struct packed {
+        logic [DB_FLAGS_W-1:0]       flags;                  // CQ arm flags，bit0 表示 solicited-only。
+        logic [DB_SEQUENCE_W-1:0]    arm_sequence;           // 软件递增的 CQ arm sequence，便于后续调试/乱序检测。
+        logic [QUEUE_IDX_W-1:0]      consumer_index;         // 软件观察到的 CQ consumer index。
+    } cq_arm_doorbell_payload_t;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。

@@ -12,6 +12,8 @@
 | `test_msix.py` | `rtl/pcie/pcie_msix.sv` | masked interrupt pending、unmask 后 message 输出、PBA bit 清除 |
 | `test_sriov_function_manager.py` | `rtl/pcie/pcie_function_manager.sv` | PF 允许、enabled VF 窗口内允许、disabled VF 拒绝、VF 资源越界拒绝 |
 | `test_sq_doorbell.py` | `rtl/doorbell/sq_doorbell_handler.sv` | SQ Doorbell payload 解析、producer index 更新、PI 回绕、非法 QPN、权限拒绝 |
+| `test_rq_doorbell.py` | `rtl/doorbell/rq_doorbell_handler.sv` | RQ Doorbell payload 解析、producer index 更新、PI 回绕、非法 QPN、权限拒绝 |
+| `test_cq_arm_doorbell.py` | `rtl/doorbell/cq_arm_doorbell_handler.sv` | CQ Arm payload 解析、consumer index 更新、solicited-only、非法 CQN、权限拒绝 |
 
 ## 运行方式
 
@@ -38,6 +40,8 @@ make -C sim/cocotb test-csr-mailbox
 make -C sim/cocotb test-msix
 make -C sim/cocotb test-sriov
 make -C sim/cocotb test-sq-doorbell
+make -C sim/cocotb test-rq-doorbell
+make -C sim/cocotb test-cq-arm-doorbell
 ```
 
 ## 当前限制
@@ -46,3 +50,5 @@ make -C sim/cocotb test-sq-doorbell
 - 不检查完整 PCIe TLP 编码、completion ordering 或 MSI-X TLP 发送。
 - mailbox 的 timeout 注入能力后续会随 CSR command 执行器增强；当前测试只确认 timeout 计数和错误码定义可见。
 - SQ Doorbell 测试只验证 payload 到 `qp_update_*` 事件的转换，不读取 SQ WQE，也不触发 QP scheduler。
+- RQ Doorbell 测试只验证 payload 到 `qp_rq_update_*` 事件的转换，不读取 RQ WQE，也不触发 Receive Queue 处理。
+- CQ Arm Doorbell 测试只验证 payload 到 `cq_arm_*` 事件的转换，不写 CQE，也不触发真实 MSI-X。
