@@ -1,8 +1,8 @@
 # CQ 管理
 
-本文说明 Completion Queue 管理相关模块。5.1 阶段加入 `rtl/cq/cq_context_table.sv`，它是 CQ manager 的“账本”：保存 CQ buffer 地址、深度、producer/consumer index、owner function、MSI-X vector、中断调节字段、arm 状态和错误状态。5.2 阶段加入 `rtl/cq/completion_engine.sv`，它把 SQ/RQ/cleanup/error 路径的 completion event 统一格式化成 64-byte CQE。
+本文说明 Completion Queue 管理相关模块。5.1 阶段加入 `rtl/cq/cq_context_table.sv`，它是 CQ manager 的“账本”：保存 CQ buffer 地址、深度、producer/consumer index、owner function、MSI-X vector、中断调节字段、arm 状态和错误状态。5.2 阶段加入 `rtl/cq/completion_engine.sv`，它把 SQ/RQ/cleanup/error 路径的 completion event 统一格式化成 64-byte CQE。5.3 阶段加入 `rtl/cq/cqe_write_path.sv`，它根据 CQ context 计算 host CQ buffer 地址并发出 64-byte DMA/PCIe memory write 请求。
 
-当前阶段只管理 CQ context 并格式化 CQE，不写 host CQ buffer，也不生成 MSI-X 请求。这些分别留给 5.3 和 5.5。
+当前阶段只管理 CQ context、格式化 CQE、定义 CQE memory write 请求接口，并实现基础 producer/consumer wraparound 与 overflow 检测；真实 DMA Engine 和 MSI-X 通知分别留给后续 DMA 和 5.5。
 
 ## 模块位置
 
@@ -18,7 +18,12 @@ Completion event from SQ/RQ/cleanup/error
 completion_engine --lookup CQN--> cq_context_table
         |
         +--> 64-byte CQE write request
-        +--> 后续 CQE write path 使用 buffer base/depth/PI
+        v
+cqe_write_path --lookup CQN--> cq_context_table
+        |
+        +--> 64-byte DMA/PCIe memory write request
+        +--> CQ producer index update request
+        +--> cq_index_manager 判断 full/empty/overflow
         +--> 后续 notification logic 使用 armed/moderation/MSI-X vector
 ```
 
@@ -169,6 +174,149 @@ source_engine
 
 这样设计的原因是 completion path 是 RDMA 可观测性的核心。即使当前阶段还不写 host memory，也要先让每个完成事件都能被归一化成稳定格式，后续 5.3 才能专注于地址计算和 DMA/PCIe write。
 
+## CQE Write Path
+
+`cqe_write_path` 接收 `completion_engine` 的输出：
+
+```text
+cqe_write_valid
+cqe_write_cqn
+cqe_write_owner_function
+cqe_write_data[511:0]
+cqe_write_solicited
+cqe_write_status
+cqe_write_error
+```
+
+模块先根据 `cqe_write_cqn` 查询 CQ context，并检查：
+
+- CQN 必须命中；
+- CQ context 必须 `valid = 1`；
+- `cqe_write_owner_function` 必须等于 CQ context 的 `owner_function`；
+- `cq_depth` 不能为 0；
+- 当前阶段如果 CQ context 已经标记 `overflow`，先返回预留错误，不继续写入。
+
+地址计算公式固定为：
+
+```text
+cqe_addr = cq_buffer_base_addr + producer_index * 64
+```
+
+因为 CQE 固定 64 字节，所以写入地址必须 64-byte aligned。如果 base 地址或 producer index 组合得到的地址未对齐，模块返回 `CQE_WR_ERR_ADDR_ALIGN`。实际项目里驱动创建 CQ 时也应该保证 CQ buffer base 按 CQE size 对齐。
+
+### DMA/PCIe Write 请求
+
+地址计算成功后，write path 输出一个 memory write 请求：
+
+```text
+dma_write_valid
+dma_write_addr
+dma_write_data[511:0]
+dma_write_len = 64
+dma_write_byte_enable = all ones
+dma_write_owner_function
+dma_write_tag = producer_index
+dma_write_error
+```
+
+这里的 `dma_write_*` 只是后续 DMA/PCIe write engine 的接口，不是真实 PCIe TLP。`dma_write_ready = 0` 时，模块会保持 `dma_write_valid`、地址和数据不变，直到下游接收，避免 completion event 丢失。
+
+### Producer Index Update
+
+write request 被下游接收后，模块输出 producer index 更新请求：
+
+```text
+cq_pi_update_valid
+cq_pi_update_cqn
+cq_pi_update_new_producer_index
+cq_pi_update_owner_function
+cqe_written_solicited
+cqe_written_status
+```
+
+本阶段只实现基础 wrap：
+
+```text
+if producer_index == cq_depth - 1:
+    new_producer_index = 0
+else:
+    new_producer_index = producer_index + 1
+```
+
+完整的 owner bit 翻转和复杂 race 处理留给后续更完整的 CQ manager；5.4 已经加入 reserved-slot full/empty 和基础 overflow 检测。
+
+### CQE Write Path 错误
+
+当前最小错误包括：
+
+| 错误 | 含义 |
+| --- | --- |
+| `CQE_WR_ERR_CQ_MISS` | CQN lookup miss 或 CQ context invalid。 |
+| `CQE_WR_ERR_PERMISSION` | completion function 与 CQ owner 不匹配。 |
+| `CQE_WR_ERR_CQ_ALIAS` | CQ table 发现 CQN alias。 |
+| `CQE_WR_ERR_DEPTH_ZERO` | CQ depth 为 0，无法计算 ring slot。 |
+| `CQE_WR_ERR_ADDR_ALIGN` | 计算出的 CQE 地址不是 64-byte aligned。 |
+| `CQE_WR_ERR_OVERFLOW` | CQ context 已标记 overflow，完整恢复策略留给 5.4。 |
+
+这样拆分后，5.3 只关心“把一个已格式化 CQE 放到 host CQ ring 的哪个地址，以及如何发出写请求”。它不判断 CQ 是否已满，也不决定是否通知软件；这让后续 5.4 和 5.5 的职责更单纯。
+
+## Producer/Consumer Wraparound
+
+5.4 阶段加入 `cq_index_manager`，专门管理 CQ ring index：
+
+```text
+current_producer_index
+current_consumer_index
+cq_depth
+cqe_write_commit
+cq_arm_consumer_update
+overflow_clear_valid
+    -> next_producer_index
+    -> next_consumer_index
+    -> cq_empty / cq_full / cq_has_space / cq_overflow
+```
+
+producer index 规则：
+
+```text
+if producer_index + 1 < cq_depth:
+    next_producer_index = producer_index + 1
+else:
+    next_producer_index = 0
+```
+
+consumer index 来自 CQ Arm Doorbell。只要软件提交的 consumer index 小于 `cq_depth`，就允许更新；等于或超过 `cq_depth` 会返回 `CQ_INDEX_ERR_ARM_RANGE`。这一步保证软件不能把 CI 写到 ring 外面。
+
+## Full / Empty 策略
+
+当前采用 reserved-one-entry 方案：
+
+```text
+empty: producer_index == consumer_index
+full:  next_producer_index == consumer_index
+```
+
+这个方案会牺牲一个 CQE slot，但实现简单，而且能避免 `producer == consumer` 同时表示 empty 和 full 的歧义。后续如果引入 phase/owner bit，可以把可用容量提高到完整 depth。
+
+## Overflow 处理
+
+当 `cq_full = 1` 时，如果仍然有新的 CQE write commit，`cq_index_manager` 输出：
+
+```text
+cq_overflow = 1
+index_error_code = CQ_INDEX_ERR_OVERFLOW
+```
+
+`cqe_write_path` 在发起 DMA write 前调用该判断。只有 `cq_has_space = 1` 时才允许写 CQE；如果 CQ full，则不发 DMA write，并输出：
+
+```text
+cq_overflow_set_valid
+cq_overflow_set_cqn
+cq_overflow_set_owner_function
+```
+
+这个请求用于写回 CQ context 的 `overflow` 标志，防止硬件覆盖尚未被软件消费的 CQE。`overflow_clear_valid` 可以清除 overflow 标志，清除后如果 ring 也不再 full，`cq_has_space` 会恢复为 1。
+
 ## Overflow 标志
 
 5.1 只保存 overflow 标志，不实现完整 overflow 检测。预留接口包括：
@@ -185,6 +333,6 @@ lookup、read、arm update、producer update 和 overflow set/clear 都检查请
 ## 后续连接
 
 - 5.2 CQE formatting 会读取 CQ context 中的 CQN、owner 和 CQ 状态。
-- 5.3 CQE write path 会使用 `cq_buffer_base_addr`、`cq_depth` 和 `producer_index` 计算 CQE 写回地址。
-- 5.4 wraparound/overflow 会使用 `producer_index`、`consumer_index`、`cq_depth` 和 `overflow`。
+- 5.3 CQE write path 会使用 `cq_buffer_base_addr`、`cq_depth` 和 `producer_index` 计算 CQE 写回地址，并发出 64-byte DMA/PCIe memory write 请求。
+- 5.4 wraparound/overflow 使用 `producer_index`、`consumer_index`、`cq_depth` 和 `overflow`，保护 CQE write path 不覆盖未消费 CQE。
 - 5.5 notification logic 会使用 `armed`、`solicited_only`、`msix_vector`、`moderation_count`、`moderation_timer` 和 moderation 运行时字段。

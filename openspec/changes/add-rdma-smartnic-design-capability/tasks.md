@@ -40,8 +40,8 @@
 
 - [x] 5.1 Implement CQ context table with buffer address, depth, producer index, consumer index, owner function, MSI-X vector, moderation count, moderation timer, and arm state.
 - [x] 5.2 Implement completion engine that accepts work completion events and formats 64-byte CQEs.
-- [ ] 5.3 Implement CQE write path that calculates host CQ buffer address and emits DMA/PCIe memory writes.
-- [ ] 5.4 Implement CQ producer/consumer wraparound logic and overflow detection.
+- [x] 5.3 Implement CQE write path that calculates host CQ buffer address and emits DMA/PCIe memory writes.
+- [x] 5.4 Implement CQ producer/consumer wraparound logic and overflow detection.
 - [ ] 5.5 Implement CQ notification logic for polling mode, solicited events, interrupt moderation count, and moderation timer.
 - [ ] 5.6 Add CQ tests for CQE formatting, producer/consumer updates, overflow, CQ arm races, moderation count, and MSI-X request generation.
 

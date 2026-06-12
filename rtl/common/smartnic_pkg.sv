@@ -264,12 +264,46 @@ package smartnic_pkg;
         CMPL_ENG_ERR_BAD_EVENT   = 16'h0004  // event 类型或字段非法。
     } completion_engine_error_e;
 
+    typedef enum logic [3:0] {
+        CQE_WR_STATE_IDLE        = 4'd0, // 等待 completion_engine 的 CQE write request。
+        CQE_WR_STATE_LOOKUP_CQ   = 4'd1, // 查询 CQ context。
+        CQE_WR_STATE_CHECK_SPACE = 4'd2, // 检查 CQ context、owner、depth 和 overflow 预留状态。
+        CQE_WR_STATE_CALC_ADDR   = 4'd3, // 计算 CQE host buffer 地址和下一 producer index。
+        CQE_WR_STATE_ISSUE_WRITE = 4'd4, // 发出 64-byte DMA/PCIe memory write 请求。
+        CQE_WR_STATE_UPDATE_PI   = 4'd5, // 输出 CQ producer index 更新请求。
+        CQE_WR_STATE_DONE        = 4'd6, // 本次 CQE 写入流程完成。
+        CQE_WR_STATE_ERROR       = 4'd7  // 本次 CQE 写入流程失败。
+    } cqe_write_path_state_e;
+
+    typedef enum logic [15:0] {
+        CQE_WR_ERR_NONE          = 16'h0000, // 无错误。
+        CQE_WR_ERR_CQ_MISS       = 16'h0001, // CQ lookup miss 或 CQ context invalid。
+        CQE_WR_ERR_PERMISSION    = 16'h0002, // owner_function 与 CQ owner 不匹配。
+        CQE_WR_ERR_CQ_ALIAS      = 16'h0003, // CQ table 返回 CQN alias。
+        CQE_WR_ERR_DEPTH_ZERO    = 16'h0004, // CQ depth 为 0。
+        CQE_WR_ERR_ADDR_ALIGN    = 16'h0005, // CQE 写入地址不是 64-byte aligned。
+        CQE_WR_ERR_OVERFLOW      = 16'h0006, // CQ context 已标记 overflow，完整处理留给 5.4。
+        CQE_WR_ERR_DMA_BACKPRESSURE = 16'h0007 // DMA write 长时间不 ready 的错误预留。
+    } cqe_write_path_error_e;
+
+    typedef enum logic [15:0] {
+        CQ_INDEX_ERR_NONE        = 16'h0000, // CQ index 计算成功。
+        CQ_INDEX_ERR_DEPTH_ZERO  = 16'h0001, // CQ depth 为 0。
+        CQ_INDEX_ERR_PROD_RANGE  = 16'h0002, // producer_index 超过 cq_depth - 1。
+        CQ_INDEX_ERR_CONS_RANGE  = 16'h0003, // consumer_index 超过 cq_depth - 1。
+        CQ_INDEX_ERR_ARM_RANGE   = 16'h0004, // CQ arm 提交的新 consumer index 越界。
+        CQ_INDEX_ERR_OVERFLOW    = 16'h0005  // CQ full 时仍提交 CQE write commit。
+    } cq_index_error_e;
+
     parameter logic [15:0] CQE_FMT_FLAG_HAS_IMM   = 16'h0001; // CQE 携带 immediate data。
     parameter logic [15:0] CQE_FMT_FLAG_SOLICITED = 16'h0002; // CQE 是 solicited event。
     parameter logic [15:0] CQE_FMT_FLAG_ERROR     = 16'h0004; // CQE status 表示错误。
     parameter logic [15:0] CQE_FMT_FLAG_FLUSH     = 16'h0008; // CQE 来自 cleanup flush。
     parameter logic [15:0] CQE_FMT_FLAG_RECV      = 16'h0010; // CQE 描述 receive-side completion。
     parameter logic [15:0] CQE_FMT_FLAG_SEND      = 16'h0020; // CQE 描述 send-side completion。
+    parameter logic [ADDR_W-1:0] CQE_ADDR_ALIGN_MASK = ADDR_W'(CQE_BYTES - 1); // CQE 写入地址 64B 对齐掩码。
+    parameter int CQE_DMA_BE_W = CQE_BYTES; // 64-byte CQE memory write 的 byte enable 位宽。
+    parameter logic CQ_RESERVED_SLOT_ENABLE = 1'b1; // CQ full 判断采用 reserved-one-entry 方案。
 
     // ---------------------------------------------------------------------
     // CSR mailbox 命令
