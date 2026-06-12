@@ -27,6 +27,7 @@
 | `test_completion_engine.py` | `rtl/cq/completion_engine.sv` | SQ/RQ/cleanup/error event 到 64-byte CQE 格式化、CQ lookup miss、owner mismatch、backpressure |
 | `test_cqe_write_path.py` | `rtl/cq/cqe_write_path.sv` | CQE 地址计算、64-byte DMA write 请求、PI update、lookup/permission error、DMA backpressure、基础 PI wrap |
 | `test_cq_index_manager.py` | `rtl/cq/cq_index_manager.sv` | PI/CI wraparound、CQ arm CI 更新、depth/index 越界、empty/full、overflow set/clear |
+| `test_cq_notification.py` | `rtl/cq/cq_notification.sv` | polling mode、armed、solicited-only、moderation count/timer、error immediate notify、MSI-X backpressure |
 
 ## 运行方式
 
@@ -72,6 +73,7 @@ make -C sim/cocotb test-cq-context
 make -C sim/cocotb test-completion-engine
 make -C sim/cocotb test-cqe-write-path
 make -C sim/cocotb test-cq-index-manager
+make -C sim/cocotb test-cq-notification
 ```
 
 ## 当前限制
@@ -86,3 +88,4 @@ make -C sim/cocotb test-cq-index-manager
 - Completion engine 测试只验证 CQE 格式化和 lookup/权限错误处理，不计算 CQE 地址、不更新 producer index，也不触发 MSI-X。
 - CQE write path 测试只验证地址计算、DMA write 请求和 producer update 请求，不实现真实 DMA Engine、不做完整 overflow 检测，也不触发 MSI-X。
 - CQ index manager 测试只验证 reserved-slot index 规则和 overflow 标志，不实现 owner bit phase 方案。
+- CQ notification 测试只验证 CQE commit 后的通知决策和 MSI-X request ready/valid，不发送真实 MSI-X PCIe memory write。

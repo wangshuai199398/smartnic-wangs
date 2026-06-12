@@ -295,6 +295,35 @@ package smartnic_pkg;
         CQ_INDEX_ERR_OVERFLOW    = 16'h0005  // CQ full 时仍提交 CQE write commit。
     } cq_index_error_e;
 
+    typedef enum logic [3:0] {
+        CQ_NOTIFY_STATE_IDLE       = 4'd0, // 等待 CQE commit 或 moderation timer tick。
+        CQ_NOTIFY_STATE_LOOKUP_CQ  = 4'd1, // 查询 CQ context。
+        CQ_NOTIFY_STATE_CHECK_ARM  = 4'd2, // 检查 armed/polling/error immediate 语义。
+        CQ_NOTIFY_STATE_CHECK_SOL  = 4'd3, // 检查 solicited_only 语义。
+        CQ_NOTIFY_STATE_UPDATE_MOD = 4'd4, // 更新 moderation counter/timer 状态。
+        CQ_NOTIFY_STATE_WAIT_TIMER = 4'd5, // 已有 pending completion，等待 timer tick。
+        CQ_NOTIFY_STATE_ISSUE_MSIX = 4'd6, // 输出 MSI-X request。
+        CQ_NOTIFY_STATE_CLEAR_ARM  = 4'd7, // 输出清 armed/moderation 更新。
+        CQ_NOTIFY_STATE_DONE       = 4'd8, // 本次通知流程完成。
+        CQ_NOTIFY_STATE_ERROR      = 4'd9  // 通知流程失败。
+    } cq_notification_state_e;
+
+    typedef enum logic [3:0] {
+        CQ_NOTIFY_REASON_COMPLETION = 4'd0, // 普通 completion 触发通知。
+        CQ_NOTIFY_REASON_SOLICITED  = 4'd1, // solicited completion 触发通知。
+        CQ_NOTIFY_REASON_MOD_COUNT  = 4'd2, // moderation count 达到阈值。
+        CQ_NOTIFY_REASON_MOD_TIMER  = 4'd3, // moderation timer 到期。
+        CQ_NOTIFY_REASON_ERROR      = 4'd4  // 错误 completion 立即通知。
+    } cq_notification_reason_e;
+
+    typedef enum logic [15:0] {
+        CQ_NOTIFY_ERR_NONE          = 16'h0000, // 无错误。
+        CQ_NOTIFY_ERR_CQ_MISS       = 16'h0001, // CQ lookup miss 或 CQ context invalid。
+        CQ_NOTIFY_ERR_PERMISSION    = 16'h0002, // owner_function 与 CQ owner 不匹配。
+        CQ_NOTIFY_ERR_VECTOR        = 16'h0003, // CQ context 中 MSI-X vector 非法。
+        CQ_NOTIFY_ERR_MODERATION    = 16'h0004  // moderation 配置非法或不一致。
+    } cq_notification_error_e;
+
     parameter logic [15:0] CQE_FMT_FLAG_HAS_IMM   = 16'h0001; // CQE 携带 immediate data。
     parameter logic [15:0] CQE_FMT_FLAG_SOLICITED = 16'h0002; // CQE 是 solicited event。
     parameter logic [15:0] CQE_FMT_FLAG_ERROR     = 16'h0004; // CQE status 表示错误。

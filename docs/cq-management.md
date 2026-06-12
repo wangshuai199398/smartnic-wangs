@@ -2,7 +2,7 @@
 
 本文说明 Completion Queue 管理相关模块。5.1 阶段加入 `rtl/cq/cq_context_table.sv`，它是 CQ manager 的“账本”：保存 CQ buffer 地址、深度、producer/consumer index、owner function、MSI-X vector、中断调节字段、arm 状态和错误状态。5.2 阶段加入 `rtl/cq/completion_engine.sv`，它把 SQ/RQ/cleanup/error 路径的 completion event 统一格式化成 64-byte CQE。5.3 阶段加入 `rtl/cq/cqe_write_path.sv`，它根据 CQ context 计算 host CQ buffer 地址并发出 64-byte DMA/PCIe memory write 请求。
 
-当前阶段只管理 CQ context、格式化 CQE、定义 CQE memory write 请求接口，并实现基础 producer/consumer wraparound 与 overflow 检测；真实 DMA Engine 和 MSI-X 通知分别留给后续 DMA 和 5.5。
+当前阶段只管理 CQ context、格式化 CQE、定义 CQE memory write 请求接口，实现基础 producer/consumer wraparound 与 overflow 检测，并定义 CQ notification 到 MSI-X request 的控制框架；真实 DMA Engine 和真实 MSI-X PCIe TLP 发送留给后续阶段。
 
 ## 模块位置
 
@@ -326,6 +326,77 @@ cq_overflow_set_owner_function
 
 真实 overflow 检测会在 5.4 基于 producer/consumer wraparound 和 CQ depth 实现。
 
+## CQ Notification
+
+`cq_notification` 位于 CQE write path 之后。它不格式化 CQE，也不写 host CQ buffer；它只在 CQE 已经 commit 之后，根据 CQ context 判断是否需要通知软件。
+
+输入事件来自 `cqe_write_path`：
+
+```text
+cqe_commit_valid
+cqe_commit_cqn
+cqe_commit_owner_function
+cqe_commit_solicited
+cqe_commit_status
+cqe_commit_error
+```
+
+模块先查询 CQ context，读取 `armed`、`solicited_only`、`msix_vector`、`moderation_count`、`moderation_timer` 和 `moderation_counter`。查询未命中、CQ 无效或 owner function 不匹配时，输出 `notification_error_code`，不生成 MSI-X request。
+
+## Polling Mode
+
+如果 `armed = 0`，CQ 处于 polling mode。此时 CQE 已经写入 CQ ring，软件仍然可以通过 `poll_cq` 轮询取走 completion，但硬件不会生成 MSI-X request。
+
+这样设计是为了支持高性能 RDMA 应用常见的 busy polling 模式：数据路径不依赖中断，中断只作为低负载或事件驱动模式的辅助机制。
+
+## Armed 与 Solicited-Only
+
+如果 `armed = 1`，CQ 允许触发通知。触发一次通知后，`cq_notification` 输出：
+
+```text
+cq_context_update_valid
+armed_clear_update
+```
+
+这表示 CQ 的 armed 标志需要被清除。软件如果还想继续收到中断，需要再次通过 CQ Arm Doorbell re-arm。
+
+如果 `solicited_only = 1`，只有 `cqe_commit_solicited = 1` 的 completion 可以触发通知。非 solicited completion 仍然写入 CQ ring，但不会触发 MSI-X。这对应 libibverbs 中 request notification 时常见的 solicited event 语义。
+
+## Interrupt Moderation
+
+`moderation_count` 用来按 completion 数量合并中断：
+
+- `moderation_count = 0` 或 `1`：不合并，满足 armed/solicited 条件后立即通知；
+- `moderation_count > 1`：每个可通知 completion 增加 `moderation_counter`；
+- 当 `moderation_counter + 1 >= moderation_count` 时，生成 MSI-X request，并把 counter 清零。
+
+`moderation_timer` 用来按时间上限触发通知：
+
+- 第一个可通知 completion 到来但 count 未达到阈值时，启动 timer；
+- `timer_tick` 推进内部 timer counter；
+- 当 timer counter 达到 `moderation_timer` 且已有 pending completion 时，生成 MSI-X request；
+- 通知发出后清除 pending counter/timer。
+
+当前实现只保留一个最小 pending timer 事件，用来教学展示 moderation timer 的控制语义；后续如果要支持多 CQ 并发 timer，可以把 pending register 扩展成 per-CQ timer table。
+
+## Error Completion 通知
+
+如果 `cqe_commit_error = 1` 或 completion status 不是 `CMPL_SUCCESS`，当前阶段把它视为严重错误 completion，并绕过 moderation 立即请求 MSI-X。这样可以让驱动尽快观察到 CQ/数据路径错误。
+
+## MSI-X Request
+
+通知触发后输出：
+
+```text
+msix_req_valid
+msix_req_vector
+msix_req_cqn
+msix_req_owner_function
+msix_req_reason
+```
+
+`msix_req_vector` 来自 CQ context 的 `msix_vector`，下游会接到 `pcie_msix`。如果 `msix_ready = 0`，`cq_notification` 保持 `msix_req_valid = 1`，直到 request 被接受，避免中断请求丢失。
+
 ## Owner Function 隔离
 
 lookup、read、arm update、producer update 和 overflow set/clear 都检查请求 function 是否匹配 `owner_function`。非 owner function 访问返回 `CQ_TABLE_STATUS_PERMISSION`。这样可以防止一个 VF arm 或推进另一个 VF 的 CQ，也防止 cross-VF CQ overflow 状态被篡改。
@@ -335,4 +406,4 @@ lookup、read、arm update、producer update 和 overflow set/clear 都检查请
 - 5.2 CQE formatting 会读取 CQ context 中的 CQN、owner 和 CQ 状态。
 - 5.3 CQE write path 会使用 `cq_buffer_base_addr`、`cq_depth` 和 `producer_index` 计算 CQE 写回地址，并发出 64-byte DMA/PCIe memory write 请求。
 - 5.4 wraparound/overflow 使用 `producer_index`、`consumer_index`、`cq_depth` 和 `overflow`，保护 CQE write path 不覆盖未消费 CQE。
-- 5.5 notification logic 会使用 `armed`、`solicited_only`、`msix_vector`、`moderation_count`、`moderation_timer` 和 moderation 运行时字段。
+- 5.5 notification logic 使用 `armed`、`solicited_only`、`msix_vector`、`moderation_count`、`moderation_timer` 和 moderation 运行时字段，把 CQE commit 转换成可被 `pcie_msix` 消费的 MSI-X request。

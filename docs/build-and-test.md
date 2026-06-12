@@ -59,7 +59,7 @@ make clean
 - `make pcie-test` 运行 PCIe configuration space、BAR decoder、CSR mailbox、MSI-X 和 SR-IOV function manager 的最小行为测试；
 - `make doorbell-test` 运行 Doorbell decoder、Doorbell access check、SQ/RQ Doorbell handler 和 CQ arm Doorbell handler 测试；
 - `make qp-test` 运行 QP context table、QP state validator、QP lifecycle manager、SQ engine、RQ engine、QP cleanup manager 和 QP integration 测试，覆盖 QPN lookup、alias rejection、SQ/RQ producer index 更新、owner function 权限检查、状态迁移校验、create/modify/query/destroy/error transition 命令框架、SQ WQE fetch/decode/dispatch 骨架、RQ Recv WQE fetch、DMA write dispatch、receive completion 请求骨架、destroy/error cleanup 的 Doorbell blocking、in-flight drain 和 flushed completion 请求，以及 CREATE -> RTS -> mock SQ NOP -> DESTROY 的最小控制路径。
-- `make cq-test` 运行 CQ context table、completion engine、CQE write path 和 CQ index manager 测试，覆盖 CQN lookup、alias rejection、CQ arm consumer index 更新、completion producer index 更新、owner function 权限检查、overflow set/clear、SQ/RQ/cleanup/error event 到 64-byte CQE 的格式化、CQE host 地址计算、64-byte DMA write 请求、reserved-slot full/empty 判断和 producer/consumer wraparound。
+- `make cq-test` 运行 CQ context table、completion engine、CQE write path、CQ index manager 和 CQ notification 测试，覆盖 CQN lookup、alias rejection、CQ arm consumer index 更新、completion producer index 更新、owner function 权限检查、overflow set/clear、SQ/RQ/cleanup/error event 到 64-byte CQE 的格式化、CQE host 地址计算、64-byte DMA write 请求、reserved-slot full/empty 判断、producer/consumer wraparound、polling mode、solicited-only、interrupt moderation count/timer 和 MSI-X request backpressure。
 
 这样设计的原因是学习和调试时不一定每次都要跑完整 regression。某个模块刚改完，可以先跑对应的窄测试入口，确认局部行为稳定后再跑 `make cocotb` 或 `make regression`。
 

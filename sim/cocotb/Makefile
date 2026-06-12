@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -62,6 +62,7 @@ cq-tests:
 		$(MAKE) test-completion-engine; \
 		$(MAKE) test-cqe-write-path; \
 		$(MAKE) test-cq-index-manager; \
+		$(MAKE) test-cq-notification; \
 	fi
 
 test-pcie-cfg:
@@ -167,6 +168,11 @@ test-cqe-write-path:
 test-cq-index-manager:
 	$(MAKE) TOPLEVEL=cq_index_manager MODULE=test_cq_index_manager \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/cq/cq_index_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cq-notification:
+	$(MAKE) TOPLEVEL=cq_notification MODULE=test_cq_notification \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/cq/cq_notification.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:
