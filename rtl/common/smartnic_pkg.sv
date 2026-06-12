@@ -134,11 +134,16 @@ package smartnic_pkg;
 
     parameter int WQE_BYTES       = 64;   // 硬件 WQE 大小，单位为字节。
     parameter int CQE_BYTES       = 64;   // 硬件 CQE 大小，单位为字节。
+    parameter int CQE_W           = CQE_BYTES * 8; // CQE packed 宽度：64 字节 / 512 bit。
     parameter int MAX_SGE         = 256;  // 单个 Work Request 支持的最大 SGE 数量。
     parameter int MAX_QP          = 1 << QP_ID_W; // 逻辑 QPN 空间大小。
     parameter int MAX_CQ          = 1 << CQ_ID_W; // 逻辑 CQN 空间大小。
     parameter int MAX_MR          = 1 << 14;      // 初始 MR 表规模目标：16K 条目。
     parameter int PMTU_BYTES      = 4096;         // 默认 PMTU 分段边界。
+    parameter int QP_TABLE_DEPTH  = 1024;         // 原型阶段片上 QP context 表项数量。
+    parameter int QP_TABLE_INDEX_W = 10;          // QP context 表 slot 索引位宽，覆盖 1024 项。
+    parameter int CQ_TABLE_DEPTH  = 1024;         // 原型阶段片上 CQ context 表项数量。
+    parameter int CQ_TABLE_INDEX_W = 10;          // CQ context 表 slot 索引位宽，覆盖 1024 项。
 
     // ---------------------------------------------------------------------
     // RDMA Work Request 操作码
@@ -154,7 +159,8 @@ package smartnic_pkg;
         RDMA_OP_ATOMIC_FETCH_ADD     = 8'h06, // 原子 fetch-and-add；后续阶段预留。
         RDMA_OP_BIND_MW              = 8'h07, // 将 Memory Window 绑定到某个 MR。
         RDMA_OP_LOCAL_INV            = 8'h08, // 本地 key 失效。
-        RDMA_OP_SEND_WITH_INV        = 8'h09  // Send 操作，并使远端 key 失效。
+        RDMA_OP_SEND_WITH_INV        = 8'h09, // Send 操作，并使远端 key 失效。
+        RDMA_OP_NOP                  = 8'hff  // 空 WQE；只推进 SQ consumer index。
     } rdma_opcode_e;
 
     // ---------------------------------------------------------------------
@@ -178,6 +184,24 @@ package smartnic_pkg;
         QP_STATE_ERR   = 4'd6  // 致命错误/错误状态。
     } qp_state_e;
 
+    typedef enum logic [3:0] {
+        QP_TABLE_STATUS_OK         = 4'd0, // QP 表访问成功。
+        QP_TABLE_STATUS_MISS       = 4'd1, // 按 QPN 查找未命中。
+        QP_TABLE_STATUS_PERMISSION = 4'd2, // function 与 owner_func 不匹配。
+        QP_TABLE_STATUS_ALIAS      = 4'd3, // 发现同一个 QPN 会落入多个有效表项。
+        QP_TABLE_STATUS_FULL       = 4'd4, // 新建 QP context 时没有空闲表项。
+        QP_TABLE_STATUS_INVALID    = 4'd5  // 输入字段或上游 Doorbell 更新无效。
+    } qp_table_status_e;
+
+    typedef enum logic [3:0] {
+        CQ_TABLE_STATUS_OK         = 4'd0, // CQ 表访问成功。
+        CQ_TABLE_STATUS_MISS       = 4'd1, // 按 CQN 查找未命中。
+        CQ_TABLE_STATUS_PERMISSION = 4'd2, // function 与 owner_func 不匹配。
+        CQ_TABLE_STATUS_ALIAS      = 4'd3, // 发现同一个 CQN 会落入多个有效表项。
+        CQ_TABLE_STATUS_FULL       = 4'd4, // 新建 CQ context 时没有空闲表项。
+        CQ_TABLE_STATUS_INVALID    = 4'd5  // 输入字段或上游更新无效。
+    } cq_table_status_e;
+
     // ---------------------------------------------------------------------
     // Completion 完成状态
     // ---------------------------------------------------------------------
@@ -199,6 +223,54 @@ package smartnic_pkg;
         CMPL_GENERAL_ERR         = 8'hff  // 未分类通用错误。
     } cmpl_status_e;
 
+    typedef enum logic [1:0] {
+        CMPL_EVENT_SQ      = 2'd0, // SQ/send-side completion event。
+        CMPL_EVENT_RQ      = 2'd1, // RQ/receive-side completion event。
+        CMPL_EVENT_CLEANUP = 2'd2, // QP destroy/error cleanup 产生的 flushed completion。
+        CMPL_EVENT_ERROR   = 2'd3  // 数据通路或控制路径报告的错误 completion。
+    } completion_event_type_e;
+
+    typedef enum logic [2:0] {
+        CMPL_SRC_SQ        = 3'd0, // 事件来自 SQ engine。
+        CMPL_SRC_RQ        = 3'd1, // 事件来自 RQ engine。
+        CMPL_SRC_CLEANUP   = 3'd2, // 事件来自 QP cleanup manager。
+        CMPL_SRC_DMA       = 3'd3, // 事件来自 DMA engine。
+        CMPL_SRC_TRANSPORT = 3'd4, // 事件来自 RoCEv2 transport。
+        CMPL_SRC_ERROR     = 3'd5  // 事件来自错误汇聚路径。
+    } completion_source_e;
+
+    typedef enum logic [15:0] {
+        CQE_SYNDROME_NONE        = 16'h0000, // CQE 无额外错误 syndrome。
+        CQE_SYNDROME_CQ_LOOKUP   = 16'h0001, // CQN 查找失败或 CQ 无效。
+        CQE_SYNDROME_PERMISSION  = 16'h0002, // completion event function 与 CQ owner 不匹配。
+        CQE_SYNDROME_FLUSH       = 16'h0003, // QP cleanup 产生的 WR_FLUSH_ERR。
+        CQE_SYNDROME_SOURCE_ERR  = 16'h0004, // 上游 SQ/RQ/DMA/transport 报告错误。
+        CQE_SYNDROME_BAD_EVENT   = 16'h0005  // completion event 类型或字段不受支持。
+    } cqe_syndrome_e;
+
+    typedef enum logic [2:0] {
+        CMPL_ENG_STATE_IDLE      = 3'd0, // 等待 completion event。
+        CMPL_ENG_STATE_LOOKUP_CQ = 3'd1, // 向 CQ context table 发起 CQN lookup。
+        CMPL_ENG_STATE_WAIT_CQ   = 3'd2, // 等待 CQ lookup 响应。
+        CMPL_ENG_STATE_FORMAT    = 3'd3, // 根据 event 和 lookup 结果格式化 64-byte CQE。
+        CMPL_ENG_STATE_WRITE     = 3'd4  // 向后续 CQE write path 输出 CQE write request。
+    } completion_engine_state_e;
+
+    typedef enum logic [15:0] {
+        CMPL_ENG_ERR_NONE        = 16'h0000, // 无错误。
+        CMPL_ENG_ERR_CQ_MISS     = 16'h0001, // CQN lookup miss 或 CQ context invalid。
+        CMPL_ENG_ERR_PERMISSION  = 16'h0002, // owner_function 与 CQ owner 不匹配。
+        CMPL_ENG_ERR_CQ_ALIAS    = 16'h0003, // CQ table 返回 CQN alias。
+        CMPL_ENG_ERR_BAD_EVENT   = 16'h0004  // event 类型或字段非法。
+    } completion_engine_error_e;
+
+    parameter logic [15:0] CQE_FMT_FLAG_HAS_IMM   = 16'h0001; // CQE 携带 immediate data。
+    parameter logic [15:0] CQE_FMT_FLAG_SOLICITED = 16'h0002; // CQE 是 solicited event。
+    parameter logic [15:0] CQE_FMT_FLAG_ERROR     = 16'h0004; // CQE status 表示错误。
+    parameter logic [15:0] CQE_FMT_FLAG_FLUSH     = 16'h0008; // CQE 来自 cleanup flush。
+    parameter logic [15:0] CQE_FMT_FLAG_RECV      = 16'h0010; // CQE 描述 receive-side completion。
+    parameter logic [15:0] CQE_FMT_FLAG_SEND      = 16'h0020; // CQE 描述 send-side completion。
+
     // ---------------------------------------------------------------------
     // CSR mailbox 命令
     // ---------------------------------------------------------------------
@@ -215,6 +287,7 @@ package smartnic_pkg;
         CSR_CMD_MODIFY_QP        = 16'h0301, // 修改 QP 属性/状态。
         CSR_CMD_QUERY_QP         = 16'h0302, // 查询 QP 上下文。
         CSR_CMD_DESTROY_QP       = 16'h0303, // 销毁 Queue Pair。
+        CSR_CMD_QP_TO_ERROR      = 16'h0304, // 将 Queue Pair 切入 ERR 状态。
         CSR_CMD_REG_MR           = 16'h0400, // 注册 Memory Region。
         CSR_CMD_DEREG_MR         = 16'h0401, // 注销 Memory Region。
         CSR_CMD_BIND_MW          = 16'h0402, // 绑定 Memory Window。
@@ -249,6 +322,152 @@ package smartnic_pkg;
         CSR_MB_ERR_BUSY        = 16'h0003, // mailbox 忙时收到新的 go。
         CSR_MB_ERR_BAD_OFFSET  = 16'h0004  // CSR mailbox offset 不受支持。
     } csr_mailbox_error_e;
+
+    // ---------------------------------------------------------------------
+    // QP lifecycle 命令状态
+    // ---------------------------------------------------------------------
+
+    typedef enum logic [2:0] {
+        QP_LC_STATE_IDLE    = 3'd0, // 等待 admin/CSR 命令。
+        QP_LC_STATE_LOOKUP  = 3'd1, // 访问 QP context table，确认目标 QPN 是否存在。
+        QP_LC_STATE_EXECUTE = 3'd2, // 根据命令构造下一步操作或响应。
+        QP_LC_STATE_UPDATE  = 3'd3, // 将 create/modify/destroy/error 结果写回 QP 表。
+        QP_LC_STATE_DONE    = 3'd4, // 命令成功完成，等待上游接收响应。
+        QP_LC_STATE_ERROR   = 3'd5, // 命令失败，等待上游接收错误响应。
+        QP_LC_STATE_CLEANUP = 3'd6  // 等待 QP cleanup manager 完成 destroy/error cleanup。
+    } qp_lifecycle_state_e;
+
+    typedef enum logic [7:0] {
+        QP_LC_STATUS_IDLE    = 8'h00, // lifecycle manager 空闲。
+        QP_LC_STATUS_BUSY    = 8'h01, // 命令处理中。
+        QP_LC_STATUS_SUCCESS = 8'h02, // 命令成功。
+        QP_LC_STATUS_FAILED  = 8'h03  // 命令失败。
+    } qp_lifecycle_status_e;
+
+    typedef enum logic [15:0] {
+        QP_LC_ERR_NONE          = 16'h0000, // 无错误。
+        QP_LC_ERR_INVALID_CMD   = 16'h0001, // 不支持的 QP lifecycle 命令。
+        QP_LC_ERR_NOT_FOUND     = 16'h0002, // 目标 QPN 不存在。
+        QP_LC_ERR_DUPLICATE_QPN = 16'h0003, // CREATE_QP 发现 QPN 已存在。
+        QP_LC_ERR_PERMISSION    = 16'h0004, // owner_function 不匹配。
+        QP_LC_ERR_TABLE_FULL    = 16'h0005, // QP context table 没有空闲表项。
+        QP_LC_ERR_INVALID_OWNER = 16'h0006, // owner_function 不是合法 PF/VF。
+        QP_LC_ERR_BAD_STATE     = 16'h0007, // 初始状态或状态字段不受当前阶段接受。
+        QP_LC_ERR_TABLE_ERROR   = 16'h0008, // QP context table 返回未分类错误。
+        QP_LC_ERR_STATE_TRANSITION = 16'h0009, // QP 状态迁移不合法。
+        QP_LC_ERR_MISSING_ATTR  = 16'h000a  // 状态迁移缺少必需属性。
+    } qp_lifecycle_error_e;
+
+    typedef enum logic [15:0] {
+        QP_STATE_VAL_ERR_NONE       = 16'h0000, // 状态迁移校验通过。
+        QP_STATE_VAL_ERR_TRANSITION = 16'h0009, // 当前状态到目标状态不允许。
+        QP_STATE_VAL_ERR_MISSING_ATTR = 16'h000a, // 目标状态迁移缺少必需属性。
+        QP_STATE_VAL_ERR_QP_TYPE    = 16'h000b  // 当前 QP type 不受该迁移规则支持。
+    } qp_state_validate_error_e;
+
+    typedef enum logic [3:0] {
+        SQ_ENG_STATE_IDLE       = 4'd0, // 等待 Doorbell/scheduler 输入。
+        SQ_ENG_STATE_LOOKUP_QP  = 4'd1, // 读取 QP context。
+        SQ_ENG_STATE_CHECK_STATE= 4'd2, // 检查 QP state 和 SQ 是否非空。
+        SQ_ENG_STATE_FETCH_WQE  = 4'd3, // 发起并等待 WQE fetch。
+        SQ_ENG_STATE_DECODE_WQE = 4'd4, // 解码 WQE opcode。
+        SQ_ENG_STATE_DISPATCH   = 4'd5, // 分发到 DMA/transport/local invalidate/NOP。
+        SQ_ENG_STATE_UPDATE_CI  = 4'd6, // 更新 SQ consumer index。
+        SQ_ENG_STATE_ERROR      = 4'd7  // 输出错误/completion 请求。
+    } sq_engine_state_e;
+
+    typedef enum logic [3:0] {
+        RQ_ENG_STATE_IDLE            = 4'd0, // 等待 transport RX 入站 Send。
+        RQ_ENG_STATE_LOOKUP_QP       = 4'd1, // 读取 QP context。
+        RQ_ENG_STATE_CHECK_STATE     = 4'd2, // 检查 QP state 是否允许接收。
+        RQ_ENG_STATE_CHECK_RQ_AVAILABLE = 4'd3, // 检查 RQ 是否有 Recv WQE。
+        RQ_ENG_STATE_FETCH_RECV_WQE  = 4'd4, // 发起并等待 Recv WQE fetch。
+        RQ_ENG_STATE_DECODE_RECV_WQE = 4'd5, // 解码 Recv WQE buffer/length/lkey。
+        RQ_ENG_STATE_DISPATCH_DMA_WRITE = 4'd6, // 分发 DMA write 请求。
+        RQ_ENG_STATE_UPDATE_CI       = 4'd7, // 更新 RQ consumer index。
+        RQ_ENG_STATE_COMPLETE        = 4'd8, // 生成 receive completion 请求。
+        RQ_ENG_STATE_ERROR           = 4'd9  // 输出错误/RNR 请求。
+    } rq_engine_state_e;
+
+    typedef enum logic [15:0] {
+        SQ_ENG_ERR_NONE             = 16'h0000, // 无错误。
+        SQ_ENG_ERR_LOOKUP_MISS      = 16'h0001, // QPN lookup/read 未命中。
+        SQ_ENG_ERR_PERMISSION       = 16'h0002, // owner_function 不匹配。
+        SQ_ENG_ERR_BAD_STATE        = 16'h0003, // 当前 QP state 不允许处理 SQ WQE。
+        SQ_ENG_ERR_UNSUPPORTED_OPCODE = 16'h0004, // WQE opcode 当前阶段不支持。
+        SQ_ENG_ERR_FETCH            = 16'h0005, // WQE fetch response 报错。
+        SQ_ENG_ERR_QUEUE_INDEX      = 16'h0006, // SQ depth/index 不合法。
+        SQ_ENG_ERR_DISABLED         = 16'h0007  // SQ engine 未使能。
+    } sq_engine_error_e;
+
+    typedef enum logic [15:0] {
+        RQ_ENG_ERR_NONE             = 16'h0000, // 无错误。
+        RQ_ENG_ERR_LOOKUP_MISS      = 16'h0001, // QPN lookup/read 未命中。
+        RQ_ENG_ERR_PERMISSION       = 16'h0002, // owner_function 不匹配。
+        RQ_ENG_ERR_BAD_STATE        = 16'h0003, // 当前 QP state 不允许接收 Send。
+        RQ_ENG_ERR_RNR              = 16'h0004, // RQ 为空，没有可用 Recv WQE。
+        RQ_ENG_ERR_FETCH            = 16'h0005, // Recv WQE fetch response 报错。
+        RQ_ENG_ERR_LOCAL_LEN        = 16'h0006, // 入站 payload 长度大于 Recv buffer 长度。
+        RQ_ENG_ERR_DMA              = 16'h0007, // DMA write dispatch/response 报错。
+        RQ_ENG_ERR_QUEUE_INDEX      = 16'h0008, // RQ depth/index 不合法。
+        RQ_ENG_ERR_DISABLED         = 16'h0009  // RQ engine 未使能。
+    } rq_engine_error_e;
+
+    typedef enum logic [3:0] {
+        QP_CLEAN_STATE_IDLE          = 4'd0, // 等待 destroy/error cleanup 请求。
+        QP_CLEAN_STATE_LOCK_QP       = 4'd1, // 读取并锁定目标 QP context。
+        QP_CLEAN_STATE_BLOCK_DB      = 4'd2, // 通知 Doorbell path 阻止新的 SQ/RQ/CQ arm 更新。
+        QP_CLEAN_STATE_QUIESCE       = 4'd3, // 等待 SQ/RQ/DMA/transport in-flight work 归零。
+        QP_CLEAN_STATE_FLUSH_SQ      = 4'd4, // 为未消费 SQ WQE 生成 flushed completion。
+        QP_CLEAN_STATE_FLUSH_RQ      = 4'd5, // 为未消费 RQ WQE 生成 flushed receive completion/indication。
+        QP_CLEAN_STATE_UPDATE_CTX    = 4'd6, // 写回 destroy 或 ERR context。
+        QP_CLEAN_STATE_DONE          = 4'd7, // cleanup 成功完成。
+        QP_CLEAN_STATE_ERROR         = 4'd8  // cleanup 失败。
+    } qp_cleanup_state_e;
+
+    typedef enum logic [1:0] {
+        QP_CLEAN_REASON_NONE         = 2'd0, // 无 cleanup 请求。
+        QP_CLEAN_REASON_DESTROY      = 2'd1, // DESTROY_QP 触发的资源释放。
+        QP_CLEAN_REASON_ERROR        = 2'd2  // QP_TO_ERROR 或数据通路错误触发的错误清理。
+    } qp_cleanup_reason_e;
+
+    typedef enum logic [15:0] {
+        QP_CLEAN_ERR_NONE            = 16'h0000, // 无错误。
+        QP_CLEAN_ERR_LOOKUP_MISS     = 16'h0001, // QPN 不存在或已被销毁。
+        QP_CLEAN_ERR_PERMISSION      = 16'h0002, // cleanup 请求 function 不是 QP owner。
+        QP_CLEAN_ERR_TIMEOUT         = 16'h0003, // 等待 in-flight work 或 completion ready 超时。
+        QP_CLEAN_ERR_BACKPRESSURE    = 16'h0004, // completion path 长时间 backpressure。
+        QP_CLEAN_ERR_REPEATED_REQ    = 16'h0005, // cleanup 忙时收到重复请求。
+        QP_CLEAN_ERR_ALREADY_ERR     = 16'h0006, // error cleanup 请求的 QP 已在 ERR 状态。
+        QP_CLEAN_ERR_ALREADY_DESTROYED = 16'h0007, // destroy 请求的 QP 已无有效 context。
+        QP_CLEAN_ERR_TABLE_ERROR     = 16'h0008  // QP context table 返回未分类错误。
+    } qp_cleanup_error_e;
+
+    parameter int QP_CLEANUP_TIMEOUT_CYCLES = 1024; // 原型阶段 cleanup 等待超时默认周期数。
+
+    parameter logic [31:0] QP_MOD_MASK_STATE       = 32'h0000_0001; // MODIFY_QP 更新 QP state。
+    parameter logic [31:0] QP_MOD_MASK_TYPE        = 32'h0000_0002; // MODIFY_QP 更新 QP type。
+    parameter logic [31:0] QP_MOD_MASK_PD          = 32'h0000_0004; // MODIFY_QP 更新 Protection Domain。
+    parameter logic [31:0] QP_MOD_MASK_CQ          = 32'h0000_0008; // MODIFY_QP 更新 send/recv CQ。
+    parameter logic [31:0] QP_MOD_MASK_QUEUE_ADDR  = 32'h0000_0010; // MODIFY_QP 更新 SQ/RQ base address。
+    parameter logic [31:0] QP_MOD_MASK_QUEUE_DEPTH = 32'h0000_0020; // MODIFY_QP 更新 SQ/RQ depth。
+    parameter logic [31:0] QP_MOD_MASK_QUEUE_INDEX = 32'h0000_0040; // MODIFY_QP 更新 SQ/RQ producer/consumer index。
+    parameter logic [31:0] QP_MOD_MASK_PSN         = 32'h0000_0080; // MODIFY_QP 更新 PSN 状态。
+    parameter logic [31:0] QP_MOD_MASK_RETRY       = 32'h0000_0100; // MODIFY_QP 更新 retry/RNR retry。
+    parameter logic [31:0] QP_MOD_MASK_REMOTE_QPN  = 32'h0000_0200; // MODIFY_QP 更新 remote QPN。
+    parameter logic [31:0] QP_MOD_MASK_KEYS        = 32'h0000_0400; // MODIFY_QP 更新 pkey/qkey。
+    parameter logic [31:0] QP_MOD_MASK_AH          = 32'h0000_0800; // MODIFY_QP 更新 AH。
+    parameter logic [31:0] QP_MOD_MASK_ERROR       = 32'h0000_1000; // MODIFY_QP 更新 error_state/error_code。
+
+    parameter logic [31:0] QP_ATTR_MASK_PD          = 32'h0000_0001; // 状态迁移需要 PD。
+    parameter logic [31:0] QP_ATTR_MASK_CQ          = 32'h0000_0002; // 状态迁移需要 send/recv CQ。
+    parameter logic [31:0] QP_ATTR_MASK_QUEUE_ADDR  = 32'h0000_0004; // 状态迁移需要 SQ/RQ base address。
+    parameter logic [31:0] QP_ATTR_MASK_QUEUE_DEPTH = 32'h0000_0008; // 状态迁移需要 SQ/RQ depth。
+    parameter logic [31:0] QP_ATTR_MASK_REMOTE_QPN  = 32'h0000_0010; // RC RTR 需要 remote QPN。
+    parameter logic [31:0] QP_ATTR_MASK_RQ_PSN      = 32'h0000_0020; // RTR 需要接收/expected PSN。
+    parameter logic [31:0] QP_ATTR_MASK_AH          = 32'h0000_0040; // RTR 需要路径/Address Handle 信息。
+    parameter logic [31:0] QP_ATTR_MASK_SQ_PSN      = 32'h0000_0080; // RTS 需要发送 PSN。
+    parameter logic [31:0] QP_ATTR_MASK_RETRY       = 32'h0000_0100; // RC RTS 需要 retry/RNR retry 参数。
 
     // ---------------------------------------------------------------------
     // Doorbell 类型
@@ -390,18 +609,87 @@ package smartnic_pkg;
     } wqe_t;
 
     typedef struct packed {
-        cmpl_status_e              status;          // Completion 完成状态。
-        rdma_opcode_e              opcode;          // 已完成 Work Request 的操作码。
-        logic [7:0]                flags;           // CQE 标志，例如 immediate/solicited/invalidated。
         logic [WR_ID_W-1:0]        wr_id;           // 从 WQE 复制回来的应用 WR ID。
         logic [QP_ID_W-1:0]        qpn;             // 产生该 completion 的本地 QP。
-        logic [QP_ID_W-1:0]        src_qpn;         // UD 接收 completion 中的源 QPN。
-        logic [DMA_LEN_W-1:0]      byte_count;      // 已完成的字节数。
-        logic [31:0]               imm_data;        // CQE_FLAG_IMM 置位时有效的 immediate data。
-        logic [KEY_W-1:0]          inv_rkey;        // CQE_FLAG_INV 置位时有效的失效 rkey。
-        logic [63:0]               timestamp;       // 用于性能分析/调试的设备时间戳。
-        logic [31:0]               vendor_err;      // 设备私有错误详情。
+        rdma_opcode_e              opcode;          // 已完成 Work Request 的操作码或 receive 语义 opcode。
+        cmpl_status_e              status;          // Completion 完成状态。
+        logic [DMA_LEN_W-1:0]      byte_len;        // 已完成的字节数。
+        logic [31:0]               imm_data;        // CQE_FMT_FLAG_HAS_IMM 置位时有效的 immediate data。
+        logic                      has_imm;         // 是否携带 immediate data。
+        logic                      solicited;       // 是否为 solicited completion。
+        logic [31:0]               vendor_error;    // 设备私有错误详情。
+        logic [VF_ID_W-1:0]        owner_function;  // 拥有该 CQE 的 PF/VF function。
+        logic [CQ_ID_W-1:0]        cqn;             // 目标 CQ 编号。
+        cqe_syndrome_e             syndrome;        // 硬件内部错误归因，便于驱动调试。
+        logic [15:0]               flags;           // CQE flags：imm、solicited、error、flush、recv/send 等。
+        logic [63:0]               timestamp;       // 用于性能分析/调试的设备时间戳；当前阶段由输入透传/置零。
+        logic                      valid;           // CQE 有效位。
+        logic                      owner_bit;       // CQ ring owner bit 预留，后续随 producer wraparound 更新。
+        logic [171:0]              reserved;        // 保留位，保证 CQE 总宽度为 64 字节。
     } cqe_t;
+
+    typedef struct packed {
+        completion_event_type_e    event_type;      // SQ、RQ、cleanup flush 或 error event。
+        logic [QP_ID_W-1:0]        qpn;             // 产生 completion 的 QPN。
+        logic [CQ_ID_W-1:0]        cqn;             // 目标 CQN。
+        logic [VF_ID_W-1:0]        owner_function;  // completion 所属 PF/VF function。
+        logic [WR_ID_W-1:0]        wr_id;           // 应回填到 CQE 的 WR ID。
+        rdma_opcode_e              opcode;          // 原始 WR opcode 或 receive completion opcode。
+        cmpl_status_e              status;          // 上游 completion 状态。
+        logic [DMA_LEN_W-1:0]      byte_len;        // 完成字节数。
+        logic [31:0]               imm_data;        // immediate data。
+        logic                      has_imm;         // immediate data 是否有效。
+        logic                      solicited;       // 是否为 solicited event。
+        logic [31:0]               vendor_error;    // 上游错误码或设备私有错误。
+        completion_source_e        source_engine;   // 事件来源模块。
+    } completion_event_t;
+
+    typedef struct packed {
+        logic [VF_ID_W-1:0]         owner_func;      // 产生 dispatch 的 PF/VF function。
+        logic [QP_ID_W-1:0]         qpn;             // 产生 dispatch 的 QPN。
+        rdma_opcode_e               opcode;          // WQE opcode。
+        qp_type_e                   qp_type;         // QP 类型，后续 transport 选择 RC/UD 行为。
+        logic [PD_ID_W-1:0]         pd_id;           // 与 QP 关联的 Protection Domain。
+        logic [CQ_ID_W-1:0]         send_cqn;        // Send completion 使用的 CQ。
+        logic [QUEUE_IDX_W-1:0]     sq_consumer;     // 被消费的 SQ WQE index。
+        wqe_t                       wqe;             // 原始 WQE 内容。
+    } sq_dispatch_req_t;
+
+    typedef struct packed {
+        logic [VF_ID_W-1:0]         owner_func;      // DMA write 所属 PF/VF function。
+        logic [QP_ID_W-1:0]         qpn;             // 接收入站 Send 的 QPN。
+        logic [PD_ID_W-1:0]         pd_id;           // 与 QP 关联的 Protection Domain。
+        logic [WR_ID_W-1:0]         wr_id;           // Recv WQE 的 WR ID。
+        logic [ADDR_W-1:0]          dst_addr;        // Recv buffer 目标地址。
+        logic [KEY_W-1:0]           lkey;            // Recv buffer 本地 key。
+        logic [DMA_LEN_W-1:0]       length;          // 需要写入的入站 payload 长度。
+        logic [7:0]                 flags;           // Recv WQE flags，后续用于 scatter-gather/inline 语义。
+    } rq_dma_write_req_t;
+
+    typedef struct packed {
+        logic [VF_ID_W-1:0]         owner_func;      // completion 所属 PF/VF function。
+        logic [QP_ID_W-1:0]         qpn;             // 接收完成的 QPN。
+        logic [CQ_ID_W-1:0]         cqn;             // receive completion 使用的 CQ。
+        logic [WR_ID_W-1:0]         wr_id;           // Recv WQE 的 WR ID。
+        cmpl_status_e               status;          // completion 状态。
+        logic [DMA_LEN_W-1:0]       byte_count;      // 接收的 payload 字节数。
+        logic                       recv_with_imm;   // 1 表示 RECV_WITH_IMM，0 表示普通 RECV。
+        logic                       has_imm;         // 是否携带 immediate data。
+        logic [31:0]                imm_data;        // immediate data。
+        logic                       solicited;       // 是否为 solicited event。
+        rq_engine_error_e           error_code;      // RQ engine 错误码。
+    } rq_completion_req_t;
+
+    typedef struct packed {
+        logic [VF_ID_W-1:0]         owner_func;      // flushed completion 所属 PF/VF function。
+        logic [QP_ID_W-1:0]         qpn;             // 被 cleanup 的 QPN。
+        logic [CQ_ID_W-1:0]         cqn;             // SQ 使用 send CQ，RQ 使用 recv CQ。
+        cmpl_status_e               status;          // cleanup flush 使用 CMPL_WR_FLUSH_ERR。
+        logic                       is_sq;           // 1 表示 SQ flushed completion。
+        logic                       is_rq;           // 1 表示 RQ flushed completion/indication。
+        logic [QUEUE_IDX_W-1:0]     queue_index;     // 被 flush 的 SQ/RQ slot index。
+        qp_cleanup_reason_e         reason;          // destroy 或 error cleanup 来源。
+    } qp_flush_completion_req_t;
 
     typedef struct packed {
         logic                       valid;          // QP 上下文条目已分配。
@@ -429,22 +717,28 @@ package smartnic_pkg;
         logic [15:0]                pkey;           // BTH 校验使用的 Partition Key。
         logic [QKEY_W-1:0]          qkey;           // DETH 校验使用的 UD Q_Key。
         logic [AH_ID_W-1:0]         ah_id;          // UD 发送路径默认使用的 Address Handle。
+        logic                       error_state;    // 该 QP 是否已进入错误处理状态。
+        logic [15:0]                error_code;     // QP 最近一次错误的设备内部错误码。
     } qp_context_t;
 
     typedef struct packed {
         logic                       valid;          // CQ 上下文条目已分配。
-        logic [VF_ID_W-1:0]         owner_func;     // 拥有该 CQ 的 PF/VF function。
         logic [CQ_ID_W-1:0]         cqn;            // Completion Queue Number tag。
-        logic [ADDR_W-1:0]          cq_base;        // CQ buffer 的主机地址。
+        logic [ADDR_W-1:0]          cq_buffer_base_addr; // CQE ring buffer 的主机地址。
         logic [QUEUE_DEPTH_W-1:0]   cq_depth;       // CQE 槽位数量。
-        logic [QUEUE_IDX_W-1:0]     producer;       // 硬件 producer index。
-        logic [QUEUE_IDX_W-1:0]     consumer;       // 硬件观察到的软件 consumer index。
+        logic [QUEUE_IDX_W-1:0]     producer_index; // 硬件下一次要写入的 CQE index。
+        logic [QUEUE_IDX_W-1:0]     consumer_index; // 软件通过 poll/arm 提交的 consumer index。
+        logic [VF_ID_W-1:0]         owner_function; // 拥有该 CQ 的 PF/VF function。
         logic [CQ_VECTOR_W-1:0]     msix_vector;    // 与该 CQ 关联的 MSI-X vector。
-        logic [15:0]                moderation_cnt; // 非零时每 N 个 completion 触发一次中断。
+        logic [15:0]                moderation_count; // 非零时每 N 个 completion 触发一次通知。
         logic [15:0]                moderation_timer;// 中断调节定时器，单位由具体实现定义。
+        logic [15:0]                moderation_counter; // 当前 moderation completion 计数。
+        logic                       moderation_timer_active; // moderation timer 是否正在计时。
         logic                       armed;          // CQ 通知已 arm。
         logic                       solicited_only; // 仅 solicited CQE 可以触发通知。
         logic                       overflow;       // 已检测到 CQ 溢出。
+        logic                       error_state;    // CQ 是否处于错误状态。
+        logic [15:0]                error_code;     // CQ 最近一次错误码。
     } cq_context_t;
 
     typedef struct packed {

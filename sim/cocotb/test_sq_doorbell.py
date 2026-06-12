@@ -10,6 +10,7 @@ DB_TYPE_SQ = 1
 DB_ERR_NONE = 0
 DB_ERR_ACCESS_DENIED = 2
 DB_ERR_INVALID_QPN = 3
+DB_ERR_BAD_PAYLOAD = 4
 
 
 def pack_sq_payload(new_pi, sequence=0, flags=0):
@@ -48,11 +49,12 @@ async def send_sq_doorbell(
     access_allowed=1,
     access_error=0,
     qpn_valid=1,
+    queue_index=None,
 ):
     dut.sq_db_valid.value = 1
     dut.doorbell_type.value = DB_TYPE_SQ
     dut.qpn.value = qpn
-    dut.queue_index.value = new_pi
+    dut.queue_index.value = new_pi if queue_index is None else queue_index
     dut.raw_payload.value = pack_sq_payload(new_pi, sequence, flags)
     dut.owner_function.value = function_id
     dut.access_allowed.value = access_allowed
@@ -113,3 +115,26 @@ async def access_denied_returns_error(dut):
     assert int(dut.qp_update_valid.value) == 1
     assert int(dut.qp_update_error.value) == 1
     assert int(dut.qp_update_error_code.value) == DB_ERR_ACCESS_DENIED
+
+
+@cocotb.test()
+async def bad_payload_returns_error(dut):
+    await reset_dut(dut)
+
+    await send_sq_doorbell(dut, new_pi=12, queue_index=11)
+
+    assert int(dut.qp_update_valid.value) == 1
+    assert int(dut.qp_update_error.value) == 1
+    assert int(dut.qp_update_error_code.value) == DB_ERR_BAD_PAYLOAD
+
+
+@cocotb.test()
+async def access_denied_marks_update_invalid(dut):
+    await reset_dut(dut)
+
+    await send_sq_doorbell(dut, qpn=55, new_pi=33, access_allowed=0, access_error=1)
+
+    assert int(dut.qp_update_valid.value) == 1
+    assert int(dut.qp_update_error.value) == 1
+    assert int(dut.qp_update_error_code.value) == DB_ERR_ACCESS_DENIED
+    assert int(dut.qp_update_qpn.value) == 55

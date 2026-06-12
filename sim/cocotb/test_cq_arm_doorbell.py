@@ -47,11 +47,12 @@ async def send_cq_arm_doorbell(
     access_allowed=1,
     access_error=0,
     cqn_valid=1,
+    queue_index=None,
 ):
     dut.cq_db_valid.value = 1
     dut.doorbell_type.value = DB_TYPE_CQ_ARM
     dut.cqn.value = cqn
-    dut.queue_index.value = consumer_index
+    dut.queue_index.value = consumer_index if queue_index is None else queue_index
     dut.raw_payload.value = pack_cq_arm_payload(consumer_index, sequence, flags)
     dut.owner_function.value = function_id
     dut.access_allowed.value = access_allowed
@@ -113,4 +114,16 @@ async def access_denied_returns_error(dut):
     assert int(dut.cq_arm_valid.value) == 1
     assert int(dut.cq_arm_error.value) == 1
     assert int(dut.cq_arm_error_code.value) == DB_ERR_ACCESS_DENIED
+    assert int(dut.cq_arm_armed.value) == 0
+
+
+@cocotb.test()
+async def bad_payload_returns_error(dut):
+    await reset_dut(dut)
+
+    await send_cq_arm_doorbell(dut, consumer_index=16, queue_index=15)
+
+    assert int(dut.cq_arm_valid.value) == 1
+    assert int(dut.cq_arm_error.value) == 1
+    assert int(dut.cq_arm_error_code.value) == DB_ERR_BAD_PAYLOAD
     assert int(dut.cq_arm_armed.value) == 0

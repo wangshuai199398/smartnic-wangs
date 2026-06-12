@@ -92,7 +92,10 @@ module pcie_csr_mailbox (
             unique case (cmd_id)
                 CSR_CMD_NOP,
                 CSR_CMD_CREATE_QP,
+                CSR_CMD_MODIFY_QP,
+                CSR_CMD_QUERY_QP,
                 CSR_CMD_DESTROY_QP,
+                CSR_CMD_QP_TO_ERROR,
                 CSR_CMD_CREATE_CQ,
                 CSR_CMD_DESTROY_CQ,
                 CSR_CMD_REG_MR,

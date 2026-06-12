@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -30,9 +30,36 @@ doorbell-tests:
 	elif ! command -v verilator >/dev/null 2>&1; then \
 		echo "[cocotb] 未安装 Verilator，跳过 Doorbell 单元测试。"; \
 	else \
+		$(MAKE) test-doorbell-decoder; \
+		$(MAKE) test-doorbell-access; \
 		$(MAKE) test-sq-doorbell; \
 		$(MAKE) test-rq-doorbell; \
 		$(MAKE) test-cq-arm-doorbell; \
+	fi
+
+qp-tests:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 cocotb，跳过 QP 单元测试。"; \
+	elif ! command -v verilator >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 Verilator，跳过 QP 单元测试。"; \
+	else \
+		$(MAKE) test-qp-context; \
+		$(MAKE) test-qp-state-validator; \
+		$(MAKE) test-qp-lifecycle; \
+		$(MAKE) test-sq-engine; \
+		$(MAKE) test-rq-engine; \
+		$(MAKE) test-qp-cleanup; \
+		$(MAKE) test-qp-integration; \
+	fi
+
+cq-tests:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 cocotb，跳过 CQ 单元测试。"; \
+	elif ! command -v verilator >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 Verilator，跳过 CQ 单元测试。"; \
+	else \
+		$(MAKE) test-cq-context; \
+		$(MAKE) test-completion-engine; \
 	fi
 
 test-pcie-cfg:
@@ -60,6 +87,16 @@ test-sriov:
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/pcie/pcie_function_manager.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
+test-doorbell-decoder:
+	$(MAKE) TOPLEVEL=doorbell_decoder MODULE=test_doorbell_decoder \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/doorbell_decoder.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-doorbell-access:
+	$(MAKE) TOPLEVEL=doorbell_access_check MODULE=test_doorbell_access_check \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/doorbell_access_check.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
 test-sq-doorbell:
 	$(MAKE) TOPLEVEL=sq_doorbell_handler MODULE=test_sq_doorbell \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/sq_doorbell_handler.sv" \
@@ -73,6 +110,51 @@ test-rq-doorbell:
 test-cq-arm-doorbell:
 	$(MAKE) TOPLEVEL=cq_arm_doorbell_handler MODULE=test_cq_arm_doorbell \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/doorbell/cq_arm_doorbell_handler.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-qp-context:
+	$(MAKE) TOPLEVEL=qp_context_table MODULE=test_qp_context_table \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/qp_context_table.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-qp-state-validator:
+	$(MAKE) TOPLEVEL=qp_state_validator MODULE=test_qp_state_validator \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/qp_state_validator.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-qp-lifecycle:
+	$(MAKE) TOPLEVEL=qp_lifecycle_manager MODULE=test_qp_lifecycle \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/qp_context_table.sv ../../rtl/qp/qp_state_validator.sv ../../rtl/qp/qp_lifecycle_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-sq-engine:
+	$(MAKE) TOPLEVEL=sq_engine MODULE=test_sq_engine \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/sq_engine.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-rq-engine:
+	$(MAKE) TOPLEVEL=rq_engine MODULE=test_rq_engine \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/rq_engine.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-qp-cleanup:
+	$(MAKE) TOPLEVEL=qp_cleanup_manager MODULE=test_qp_cleanup \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/qp_cleanup_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-qp-integration:
+	$(MAKE) TOPLEVEL=qp_lifecycle_manager MODULE=test_qp_integration \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/qp/qp_context_table.sv ../../rtl/qp/qp_state_validator.sv ../../rtl/qp/qp_lifecycle_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cq-context:
+	$(MAKE) TOPLEVEL=cq_context_table MODULE=test_cq_context_table \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/cq/cq_context_table.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-completion-engine:
+	$(MAKE) TOPLEVEL=completion_engine MODULE=test_completion_engine \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/cq/completion_engine.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

@@ -10,6 +10,10 @@
 make lint
 make verilator
 make cocotb
+make pcie-test
+make doorbell-test
+make qp-test
+make cq-test
 make driver
 make userspace
 make regression
@@ -44,9 +48,20 @@ make clean
 
 `make cocotb` 是 Cocotb 测试入口。
 
-当前它只打印占位信息。后续会运行 `verif/cocotb` 下的 Python 测试，包括 PCIe BFM、Ethernet/RoCEv2 BFM、host memory model、scoreboard 和覆盖率采集。
+当前它会进入 `sim/cocotb`，依次调用 PCIe 控制面、Doorbell path、QP manager 和 CQ manager 的模块级测试入口。如果本机尚未安装 Cocotb 或 Verilator，对应子目标会打印跳过信息。
 
 它支撑的验证目标是用 Python 测试激励验证 Doorbell、QP、CQ、MR、DMA、RoCEv2 packet 和 completion 等模块行为。
+
+## make pcie-test / doorbell-test / qp-test / cq-test
+
+这些目标是模块级测试的快捷入口：
+
+- `make pcie-test` 运行 PCIe configuration space、BAR decoder、CSR mailbox、MSI-X 和 SR-IOV function manager 的最小行为测试；
+- `make doorbell-test` 运行 Doorbell decoder、Doorbell access check、SQ/RQ Doorbell handler 和 CQ arm Doorbell handler 测试；
+- `make qp-test` 运行 QP context table、QP state validator、QP lifecycle manager、SQ engine、RQ engine、QP cleanup manager 和 QP integration 测试，覆盖 QPN lookup、alias rejection、SQ/RQ producer index 更新、owner function 权限检查、状态迁移校验、create/modify/query/destroy/error transition 命令框架、SQ WQE fetch/decode/dispatch 骨架、RQ Recv WQE fetch、DMA write dispatch、receive completion 请求骨架、destroy/error cleanup 的 Doorbell blocking、in-flight drain 和 flushed completion 请求，以及 CREATE -> RTS -> mock SQ NOP -> DESTROY 的最小控制路径。
+- `make cq-test` 运行 CQ context table 和 completion engine 测试，覆盖 CQN lookup、alias rejection、CQ arm consumer index 更新、completion producer index 更新、owner function 权限检查、overflow set/clear，以及 SQ/RQ/cleanup/error event 到 64-byte CQE 的格式化。
+
+这样设计的原因是学习和调试时不一定每次都要跑完整 regression。某个模块刚改完，可以先跑对应的窄测试入口，确认局部行为稳定后再跑 `make cocotb` 或 `make regression`。
 
 ## make driver
 
@@ -105,6 +120,7 @@ make cocotb
 - `make lint` 对应 RTL 静态质量检查；
 - `make verilator` 对应 Verilator 仿真模型构建；
 - `make cocotb` 对应 Cocotb 模块级和集成测试执行；
+- `make pcie-test`、`make doorbell-test`、`make qp-test` 和 `make cq-test` 对应当前已拆出的模块级验证入口；
 - `make regression` 对应自动化回归入口；
 - `make coverage` 对应覆盖率报告入口；
 - `make driver` 和 `make userspace` 为后续 perftest、UCX、libfabric 兼容性测试准备软件构建入口。

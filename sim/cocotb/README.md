@@ -1,6 +1,6 @@
 # Cocotb 模块级单元测试
 
-本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段只覆盖 PCIe endpoint/control-plane 和 Doorbell path 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion 或主机内存模型。
+本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager 和 CQ manager 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
 
 ## 测试文件
 
@@ -11,9 +11,20 @@
 | `test_csr_mailbox.py` | `rtl/reg/pcie_csr_mailbox.sv` | NOP GO/DONE 生命周期、非法 command_id error_code、timeout 计数寄存器可见性 |
 | `test_msix.py` | `rtl/pcie/pcie_msix.sv` | masked interrupt pending、unmask 后 message 输出、PBA bit 清除 |
 | `test_sriov_function_manager.py` | `rtl/pcie/pcie_function_manager.sv` | PF 允许、enabled VF 窗口内允许、disabled VF 拒绝、VF 资源越界拒绝 |
+| `test_doorbell_decoder.py` | `rtl/doorbell/doorbell_decoder.sv` | SQ/RQ/CQ arm offset 解码、非法 offset、未对齐 offset |
+| `test_doorbell_access_check.py` | `rtl/doorbell/doorbell_access_check.sv` | PF/VF Doorbell 访问允许、disabled VF、cross-VF、QPN/CQN 越界拒绝 |
 | `test_sq_doorbell.py` | `rtl/doorbell/sq_doorbell_handler.sv` | SQ Doorbell payload 解析、producer index 更新、PI 回绕、非法 QPN、权限拒绝 |
 | `test_rq_doorbell.py` | `rtl/doorbell/rq_doorbell_handler.sv` | RQ Doorbell payload 解析、producer index 更新、PI 回绕、非法 QPN、权限拒绝 |
 | `test_cq_arm_doorbell.py` | `rtl/doorbell/cq_arm_doorbell_handler.sv` | CQ Arm payload 解析、consumer index 更新、solicited-only、非法 CQN、权限拒绝 |
+| `test_qp_context_table.py` | `rtl/qp/qp_context_table.sv` | QPN lookup/miss、QPN alias、owner function、SQ/RQ producer index 更新 |
+| `test_qp_lifecycle.py` | `rtl/qp/qp_lifecycle_manager.sv` | CREATE/QUERY/MODIFY/DESTROY/QP_TO_ERROR、cleanup 请求、cross-function 拒绝 |
+| `test_qp_state_validator.py` | `rtl/qp/qp_state_validator.sv` | 合法/非法 QP state transition、required attribute mask |
+| `test_sq_engine.py` | `rtl/qp/sq_engine.sv` | SQ WQE fetch、NOP、dispatch、非法 state/opcode、consumer index wraparound |
+| `test_rq_engine.py` | `rtl/qp/rq_engine.sv` | Recv WQE fetch、RNR、local length error、DMA write request、receive completion request |
+| `test_qp_cleanup.py` | `rtl/qp/qp_cleanup_manager.sv` | Doorbell blocking、in-flight drain、SQ/RQ flushed completion、timeout、权限拒绝 |
+| `test_qp_integration.py` | `rtl/qp/qp_lifecycle_manager.sv` | CREATE -> RTS -> mock SQ NOP -> DESTROY cleanup 的最小控制路径 |
+| `test_cq_context_table.py` | `rtl/cq/cq_context_table.sv` | CQN lookup/miss、CQN alias、CQ arm update、completion producer update、owner function、overflow set/clear |
+| `test_completion_engine.py` | `rtl/cq/completion_engine.sv` | SQ/RQ/cleanup/error event 到 64-byte CQE 格式化、CQ lookup miss、owner mismatch、backpressure |
 
 ## 运行方式
 
@@ -22,6 +33,8 @@
 ```sh
 make pcie-test
 make doorbell-test
+make qp-test
+make cq-test
 ```
 
 或直接进入本目录运行：
@@ -29,6 +42,8 @@ make doorbell-test
 ```sh
 make -C sim/cocotb pcie-control-plane-tests
 make -C sim/cocotb doorbell-tests
+make -C sim/cocotb qp-tests
+make -C sim/cocotb cq-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -39,9 +54,20 @@ make -C sim/cocotb test-pcie-bar
 make -C sim/cocotb test-csr-mailbox
 make -C sim/cocotb test-msix
 make -C sim/cocotb test-sriov
+make -C sim/cocotb test-doorbell-decoder
+make -C sim/cocotb test-doorbell-access
 make -C sim/cocotb test-sq-doorbell
 make -C sim/cocotb test-rq-doorbell
 make -C sim/cocotb test-cq-arm-doorbell
+make -C sim/cocotb test-qp-context
+make -C sim/cocotb test-qp-state-validator
+make -C sim/cocotb test-qp-lifecycle
+make -C sim/cocotb test-sq-engine
+make -C sim/cocotb test-rq-engine
+make -C sim/cocotb test-qp-cleanup
+make -C sim/cocotb test-qp-integration
+make -C sim/cocotb test-cq-context
+make -C sim/cocotb test-completion-engine
 ```
 
 ## 当前限制
@@ -52,3 +78,5 @@ make -C sim/cocotb test-cq-arm-doorbell
 - SQ Doorbell 测试只验证 payload 到 `qp_update_*` 事件的转换，不读取 SQ WQE，也不触发 QP scheduler。
 - RQ Doorbell 测试只验证 payload 到 `qp_rq_update_*` 事件的转换，不读取 RQ WQE，也不触发 Receive Queue 处理。
 - CQ Arm Doorbell 测试只验证 payload 到 `cq_arm_*` 事件的转换，不写 CQE，也不触发真实 MSI-X。
+- CQ context table 测试只验证 CQ context 读写、arm 状态、producer index 和 overflow 标志，不格式化 CQE、不写 host CQ buffer，也不生成 MSI-X 请求。
+- Completion engine 测试只验证 CQE 格式化和 lookup/权限错误处理，不计算 CQE 地址、不更新 producer index，也不触发 MSI-X。

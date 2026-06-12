@@ -24,22 +24,22 @@
 - [x] 3.3 Implement SQ Doorbell payload parsing and QP producer index update.
 - [x] 3.4 Implement RQ Doorbell payload parsing and QP producer index update.
 - [x] 3.5 Implement CQ arm Doorbell parsing with consumer index and solicited-only flag.
-- [ ] 3.6 Add Doorbell unit tests for SQ, RQ, CQ arm, producer wraparound, invalid QPN, and cross-VF rejection.
+- [x] 3.6 Add Doorbell unit tests for SQ, RQ, CQ arm, producer wraparound, invalid QPN, and cross-VF rejection.
 
 ## 4. QP Manager
 
-- [ ] 4.1 Implement QP context table with QPN tag matching, QP type, state, PD, CQs, queue base addresses, depths, producer/consumer indices, PSN state, retry state, and owner function.
-- [ ] 4.2 Implement QP lifecycle commands for create, modify, query, destroy, and error transition.
-- [ ] 4.3 Implement IBTA-compatible QP state transition validation for RESET, INIT, RTR, RTS, SQD, SQE, and ERR states.
-- [ ] 4.4 Implement SQ engine that fetches WQEs, validates QP state, decodes work request opcode, and dispatches to DMA or transport logic.
-- [ ] 4.5 Implement RQ engine that consumes Recv WQEs for inbound Send payloads and dispatches writes to DMA.
-- [ ] 4.6 Implement QP destruction and error cleanup with pending work quiesce and flushed completions.
-- [ ] 4.7 Add QP tests for lifecycle, legal/illegal state transitions, SQ processing, RQ processing, error transition, and QPN alias prevention.
+- [x] 4.1 Implement QP context table with QPN tag matching, QP type, state, PD, CQs, queue base addresses, depths, producer/consumer indices, PSN state, retry state, and owner function.
+- [x] 4.2 Implement QP lifecycle commands for create, modify, query, destroy, and error transition.
+- [x] 4.3 Implement IBTA-compatible QP state transition validation for RESET, INIT, RTR, RTS, SQD, SQE, and ERR states.
+- [x] 4.4 Implement SQ engine that fetches WQEs, validates QP state, decodes work request opcode, and dispatches to DMA or transport logic.
+- [x] 4.5 Implement RQ engine that consumes Recv WQEs for inbound Send payloads and dispatches writes to DMA.
+- [x] 4.6 Implement QP destruction and error cleanup with pending work quiesce and flushed completions.
+- [x] 4.7 Add QP tests for lifecycle, legal/illegal state transitions, SQ processing, RQ processing, error transition, and QPN alias prevention.
 
 ## 5. CQ Manager and Completion Engine
 
-- [ ] 5.1 Implement CQ context table with buffer address, depth, producer index, consumer index, owner function, MSI-X vector, moderation count, moderation timer, and arm state.
-- [ ] 5.2 Implement completion engine that accepts work completion events and formats 64-byte CQEs.
+- [x] 5.1 Implement CQ context table with buffer address, depth, producer index, consumer index, owner function, MSI-X vector, moderation count, moderation timer, and arm state.
+- [x] 5.2 Implement completion engine that accepts work completion events and formats 64-byte CQEs.
 - [ ] 5.3 Implement CQE write path that calculates host CQ buffer address and emits DMA/PCIe memory writes.
 - [ ] 5.4 Implement CQ producer/consumer wraparound logic and overflow detection.
 - [ ] 5.5 Implement CQ notification logic for polling mode, solicited events, interrupt moderation count, and moderation timer.
