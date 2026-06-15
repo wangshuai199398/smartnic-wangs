@@ -1,6 +1,6 @@
 # Cocotb 模块级单元测试
 
-本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager、CQ manager 和 MR manager 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
+本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager、CQ manager、MR manager 和 DMA dispatcher 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
 
 ## 测试文件
 
@@ -37,6 +37,7 @@
 | `test_mr_pd_checker.py` | `rtl/mr/mr_pd_checker.sv` | QP PD 与 MR PD 匹配、PD mismatch、owner、pending、invalid entry、invalid operation、PA 透传 |
 | `test_memory_window.py` | `rtl/mr/mr_memory_window_manager.sv` | MW bind/unbind、权限子集、rkey alias、refcount drain、QP error invalidation |
 | `test_mr_integration.py` | `sim/cocotb/mr_integration_tb.sv` | REGISTER_MR -> lookup -> permission -> PD -> VA->PA -> refcount -> DEREGISTER_MR，以及 parent MR -> MW bind -> remote access -> unbind |
+| `test_dma_descriptor_dispatcher.py` | `rtl/dma/dma_descriptor_dispatcher.sv` | SQ/RQ/CQE/fetch descriptor 分发、unsupported opcode、zero length、backpressure、fixed priority |
 
 ## 运行方式
 
@@ -48,6 +49,7 @@ make doorbell-test
 make qp-test
 make cq-test
 make mr-test
+make dma-test
 ```
 
 或直接进入本目录运行：
@@ -58,6 +60,7 @@ make -C sim/cocotb doorbell-tests
 make -C sim/cocotb qp-tests
 make -C sim/cocotb cq-tests
 make -C sim/cocotb mr-tests
+make -C sim/cocotb dma-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -94,6 +97,7 @@ make -C sim/cocotb test-mr-access-checker
 make -C sim/cocotb test-mr-pd-checker
 make -C sim/cocotb test-memory-window
 make -C sim/cocotb test-mr-integration
+make -C sim/cocotb test-dma-descriptor-dispatcher
 ```
 
 ## 当前限制
@@ -118,3 +122,4 @@ make -C sim/cocotb test-mr-integration
 - MR PD checker 测试只验证 QP PD 与 MR PD 的最后一道匹配检查，不实现按 QPN 查询 QP context、remote requester identity 或 PF admin override。
 - Memory Window 测试只 mock MR table read/write 和 QP error scan 响应，不实现完整 IBTA Type 1/Type 2 MW、remote invalidate opcode 或真实 QP async event。
 - MR integration 测试使用 Python mock/stub 串起 MR 子模块语义，不实例化完整 MR manager top，不实现真实 DMA Engine、IOMMU、page walk 或 RoCEv2 transport。
+- DMA descriptor dispatcher 测试只验证 descriptor 分流和 backpressure，不执行真实 PCIe read/write、不遍历 SGE、不调用 MR checker，也不实现公平仲裁。

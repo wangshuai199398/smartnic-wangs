@@ -58,7 +58,7 @@
 
 ## 7. Scatter-Gather DMA Engine
 
-- [ ] 7.1 Implement DMA descriptor format and dispatcher for Send, Recv, RDMA Write, RDMA Read, and CQE writes.
+- [x] 7.1 Implement DMA descriptor format and dispatcher for Send, Recv, RDMA Write, RDMA Read, and CQE writes.
 - [ ] 7.2 Implement WQE and SGE fetch support for inline and extended SGE lists up to 256 entries.
 - [ ] 7.3 Implement SGE traversal with total-length accounting and zero-overlap validation.
 - [ ] 7.4 Implement MR lookup and permission integration for every DMA segment.

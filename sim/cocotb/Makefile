@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -80,6 +80,15 @@ mr-tests:
 		$(MAKE) test-mr-pd-checker; \
 		$(MAKE) test-memory-window; \
 		$(MAKE) test-mr-integration; \
+	fi
+
+dma-tests:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 cocotb，跳过 DMA 单元测试。"; \
+	elif ! command -v verilator >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 Verilator，跳过 DMA 单元测试。"; \
+	else \
+		$(MAKE) test-dma-descriptor-dispatcher; \
 	fi
 
 test-pcie-cfg:
@@ -235,6 +244,11 @@ test-memory-window:
 test-mr-integration:
 	$(MAKE) TOPLEVEL=mr_integration_tb MODULE=test_mr_integration \
 		VERILOG_SOURCES="mr_integration_tb.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-dma-descriptor-dispatcher:
+	$(MAKE) TOPLEVEL=dma_descriptor_dispatcher MODULE=test_dma_descriptor_dispatcher \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_descriptor_dispatcher.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

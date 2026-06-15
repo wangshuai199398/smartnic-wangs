@@ -375,6 +375,49 @@ package smartnic_pkg;
     } mw_error_e;
 
     // ---------------------------------------------------------------------
+    // DMA descriptor / dispatcher
+    // ---------------------------------------------------------------------
+
+    typedef enum logic [3:0] {
+        DMA_OP_SEND           = 4'd0, // Send payload 从 host memory 读出后交给 transport。
+        DMA_OP_RECV           = 4'd1, // 入站 Send payload 写入本地 Recv buffer。
+        DMA_OP_RDMA_WRITE     = 4'd2, // RDMA Write 本地 payload host read。
+        DMA_OP_RDMA_READ_REQ  = 4'd3, // 本地发起 RDMA Read request，后续接 transport path。
+        DMA_OP_RDMA_READ_RESP = 4'd4, // 收到 RDMA Read response 后 host write。
+        DMA_OP_CQE_WRITE      = 4'd5, // 64-byte CQE 写入 host CQ buffer。
+        DMA_OP_WQE_FETCH      = 4'd6, // SQ/RQ WQE fetch。
+        DMA_OP_SGE_FETCH      = 4'd7, // 扩展 SGE list fetch。
+        DMA_OP_NOP            = 4'd8, // 空 descriptor，只用于测试/保活。
+        DMA_OP_ERROR          = 4'hf  // 错误 descriptor。
+    } dma_opcode_e;
+
+    typedef enum logic [2:0] {
+        DMA_DIR_HOST_READ  = 3'd0, // 从 host memory 读 payload 或 descriptor。
+        DMA_DIR_HOST_WRITE = 3'd1, // 向 host memory 写 payload。
+        DMA_DIR_CQE_WRITE  = 3'd2, // 向 host CQ buffer 写 64-byte CQE。
+        DMA_DIR_WQE_FETCH  = 3'd3, // 读取 WQE。
+        DMA_DIR_SGE_FETCH  = 3'd4  // 读取扩展 SGE list。
+    } dma_direction_e;
+
+    typedef enum logic [3:0] {
+        DMA_DISP_STATE_IDLE        = 4'd0, // 等待任一输入 source。
+        DMA_DISP_STATE_SELECT_INPUT= 4'd1, // 已选择 source，准备进入校验。
+        DMA_DISP_STATE_VALIDATE    = 4'd2, // 校验 opcode/length/owner_function。
+        DMA_DISP_STATE_ROUTE       = 4'd3, // 根据 opcode 选择目标输出。
+        DMA_DISP_STATE_WAIT_READY  = 4'd4, // 等待目标输出 ready，保持 descriptor 不丢。
+        DMA_DISP_STATE_DONE        = 4'd5, // 本次 dispatch 完成。
+        DMA_DISP_STATE_ERROR       = 4'd6  // 输出 dma_error。
+    } dma_dispatch_state_e;
+
+    typedef enum logic [15:0] {
+        DMA_DISP_ERR_NONE          = 16'h0000, // 无错误。
+        DMA_DISP_ERR_UNSUPPORTED   = 16'h0001, // opcode 当前不支持。
+        DMA_DISP_ERR_LENGTH        = 16'h0002, // length 为 0，且 opcode 不是 NOP。
+        DMA_DISP_ERR_FUNCTION      = 16'h0003, // owner_function 不在当前 PF/VF function 范围内。
+        DMA_DISP_ERR_DIRECTION     = 16'h0004  // opcode 与 direction 不匹配。
+    } dma_dispatch_error_e;
+
+    // ---------------------------------------------------------------------
     // Completion 完成状态
     // ---------------------------------------------------------------------
 
@@ -900,6 +943,35 @@ package smartnic_pkg;
         logic [DMA_LEN_W-1:0]       length;          // 需要写入的入站 payload 长度。
         logic [7:0]                 flags;           // Recv WQE flags，后续用于 scatter-gather/inline 语义。
     } rq_dma_write_req_t;
+
+    typedef struct packed {
+        logic                       desc_valid;       // descriptor 是否有效。
+        logic [15:0]                desc_id;          // descriptor ID，用于错误和 completion 回传。
+        dma_opcode_e                dma_opcode;       // DMA 操作类型。
+        logic [QP_ID_W-1:0]         qpn;              // 相关 QPN；CQE/fetch 可为 0。
+        logic [CQ_ID_W-1:0]         cqn;              // 相关 CQN；非 CQE path 可为 0。
+        logic [VF_ID_W-1:0]         owner_function;   // 拥有该 DMA 请求的 PF/VF function。
+        logic [PD_ID_W-1:0]         pd_id;            // QP/MR 所属 Protection Domain。
+        logic [WR_ID_W-1:0]         wr_id;            // 原始 WR ID 或 completion 关联 ID。
+        logic [KEY_W-1:0]           local_key;        // 本地 lkey。
+        logic [KEY_W-1:0]           remote_key;       // 远端 rkey。
+        logic [ADDR_W-1:0]          local_va;         // 本地虚拟地址。
+        logic [ADDR_W-1:0]          remote_va;        // 远端虚拟地址。
+        logic [ADDR_W-1:0]          physical_addr;    // 已翻译物理/DMA 地址；7.4 前可为 0。
+        logic [DMA_LEN_W-1:0]       length;           // 本 descriptor 本次请求长度。
+        logic [DMA_LEN_W-1:0]       byte_len_remaining;// WR 剩余长度，SGE traversal 后续使用。
+        logic [SGE_COUNT_W-1:0]     sge_count;        // WQE 中的 SGE 数量。
+        logic [SGE_COUNT_W-1:0]     sge_index;        // 当前处理的 SGE index。
+        logic                       inline_data_present;// WQE 是否携带 inline data。
+        logic [15:0]                inline_data_len;  // inline data 长度。
+        dma_direction_e             direction;        // 目标 DMA 方向/子路径。
+        logic                       solicited;        // completion 是否为 solicited。
+        logic                       has_imm;          // 是否携带 immediate data。
+        logic [31:0]                imm_data;         // immediate data。
+        logic                       completion_required;// 该 descriptor 完成后是否需要 completion。
+        dma_dispatch_error_e        error_code;       // descriptor 内携带的错误码/预留。
+        logic [63:0]                user_context;     // 不透明上下文，供上游关联调试或 completion。
+    } dma_desc_t;
 
     typedef struct packed {
         logic [VF_ID_W-1:0]         owner_func;      // completion 所属 PF/VF function。
