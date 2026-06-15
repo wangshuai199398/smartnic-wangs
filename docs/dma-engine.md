@@ -120,3 +120,86 @@ sge_addr = sge_fetch_list_base_addr + sge_index * sizeof(sge_t)
 fetcher 逐项输出 `sge_entry_*`，最后输出 `sge_list_done`。`sge_fetch_count` 支持 1 到 256；0 会报错，超过 256 会报 unsupported/too many SGE。
 
 7.2 仍然不做 SGE traversal 的总长度统计、不做 overlap 检查，也不做 MR lookup。它只把 WQE 里的 inline/extended SGE 列表交给后续 7.3。
+
+## SGE Traversal
+
+7.3 阶段新增 `rtl/dma/dma_sge_traversal.sv`。它位于 WQE/SGE fetcher 之后、MR checker 之前，作用是把上游输出的 SGE stream 规范化成 `dma_segment_t`：
+
+```text
+dma_wqe_sge_fetcher -> dma_sge_traversal -> MR lookup/access/PD check -> DMA split/read/write
+```
+
+当前阶段只处理 SGE 元数据，不搬运 payload，也不访问 MR table。
+
+### 输入 Stream
+
+输入侧每个 SGE 至少携带：
+
+- `desc_id`：关联原始 DMA descriptor；
+- `qpn`、`owner_function`、`pd_id`：后续隔离和 MR 检查需要的上下文；
+- `operation`：后续 MR access checker 使用的操作类型；
+- `index`：SGE 在 WR 中的序号；
+- `addr`、`length`、`lkey`、`flags`：SGE 本身的地址、长度、key 和 flags；
+- `last`：标记该 SGE 是否是当前 WR 的最后一个 SGE；
+- `expected_total_len`：WQE 或上游 descriptor 期望搬运的总字节数。
+
+输出侧每个合法 SGE 会变成一个 normalized DMA segment，额外带上 `byte_offset` 和 `is_last`。
+
+### Total-Length Accounting
+
+Traversal 对每个 SGE 的 `length` 做累计：
+
+```text
+total_len += sge.length
+```
+
+当 `last=1` 到来时，`total_len` 必须等于 `expected_total_len`：
+
+- 小于 `expected_total_len`：返回 `LENGTH_UNDERRUN`；
+- 大于 `expected_total_len`：返回 `LENGTH_OVERRUN`；
+- 累计发生 32-bit 溢出：返回 `TOTAL_OVERFLOW`。
+
+当前实现选择拒绝 zero-length SGE，而不是跳过。原因是后续 MR lookup、PMTU split 和 DMA issue 都可以假设每个 segment 都代表真实字节范围，验证更直接。
+
+### Byte Offset
+
+`byte_offset` 表示当前 segment 在整个 WR payload 中的起始偏移：
+
+```text
+第 0 个 SGE: byte_offset = 0
+第 N 个 SGE: byte_offset = 前面所有 SGE length 之和
+```
+
+后续 7.7 的 PMTU/4KB split 会使用这个偏移把多个物理 segment 重新映射回同一个 WR payload。
+
+### Zero-Overlap Validation
+
+Traversal 记录最多 256 个已经接受的 SGE 范围：
+
+```text
+[seen_base[i], seen_end[i])
+```
+
+新 SGE 范围为 `[addr, addr + length)`。两个范围不重叠的条件是：
+
+```text
+A_end <= B_base 或 B_end <= A_base
+```
+
+因此相邻范围合法，例如 `[0x1000, 0x2000)` 和 `[0x2000, 0x3000)` 不算重叠。只要新范围与任意已接受范围交叠，模块返回 `SGE_OVERLAP_ERROR`。
+
+地址计算 `addr + length` 也会检查 overflow，避免 wrap 后绕过范围比较。
+
+### SGE 数量和顺序
+
+`MAX_SGE=256`，合法 index 范围是 `0..255`。Traversal 要求 index 从 0 开始单调递增：
+
+- index 重复或跳号：返回 `INDEX_ORDER`；
+- index 大于 255：返回 `INDEX_RANGE`；
+- 已开始接收 SGE list 但长期没有 `last`：返回 `MISSING_LAST`。
+
+这个顺序要求让 7.3 的硬件和测试都更容易观察。后续如果要支持乱序 SGE fetch，可以在 fetcher 或 traversal 前增加 reorder buffer。
+
+### Inline Data 边界
+
+inline data 是 payload 直接放在 WQE 中，不引用 host SGE，也不需要 lkey/rkey、MR lookup 或 overlap 检查。因此 inline data 不走普通 SGE traversal 路径。当前模块提供简单的 inline 长度校验语义：`inline_data_len` 必须等于 `expected_total_len`，payload 数据搬运留给后续 transport/DMA 数据路径。

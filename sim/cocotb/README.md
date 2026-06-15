@@ -39,6 +39,7 @@
 | `test_mr_integration.py` | `sim/cocotb/mr_integration_tb.sv` | REGISTER_MR -> lookup -> permission -> PD -> VA->PA -> refcount -> DEREGISTER_MR，以及 parent MR -> MW bind -> remote access -> unbind |
 | `test_dma_descriptor_dispatcher.py` | `rtl/dma/dma_descriptor_dispatcher.sv` | SQ/RQ/CQE/fetch descriptor 分发、unsupported opcode、zero length、backpressure、fixed priority |
 | `test_dma_wqe_sge_fetcher.py` | `rtl/dma/dma_wqe_sge_fetcher.sv` | SQ/RQ WQE fetch 地址计算、WQE decode、inline SGE、extended SGE fetch、256 SGE 边界、backpressure |
+| `test_dma_sge_traversal.py` | `rtl/dma/dma_sge_traversal.sv` | SGE total-length accounting、byte_offset、256 SGE、zero-length 拒绝、overlap 检查、index 顺序、backpressure |
 
 ## 运行方式
 

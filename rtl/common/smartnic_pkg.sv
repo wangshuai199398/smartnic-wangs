@@ -144,6 +144,9 @@ package smartnic_pkg;
     parameter int INLINE_DATA_BYTES = 32; // WQE inline payload 预留窗口大小。
     parameter int INLINE_DATA_W   = INLINE_DATA_BYTES * 8; // inline payload packed 宽度。
     parameter int DMA_HOST_READ_TAG_W = 16; // fetcher 发起 host read 使用的 tag 位宽。
+    parameter int DMA_BYTE_OFFSET_W = DMA_LEN_W; // SGE traversal 输出的 WR 内字节偏移位宽。
+    parameter int DMA_TOTAL_LEN_W = DMA_LEN_W + 1; // 总长度累计多 1 bit，用于检测 32-bit length 溢出。
+    parameter int SGE_TRAVERSAL_TIMEOUT_CYCLES = 1024; // 等待 SGE last 标志的超时周期。
     parameter int MAX_QP          = 1 << QP_ID_W; // 逻辑 QPN 空间大小。
     parameter int MAX_CQ          = 1 << CQ_ID_W; // 逻辑 CQN 空间大小。
     parameter int MAX_MR          = 1 << 14;      // 初始 MR 表规模目标：16K 条目。
@@ -484,6 +487,34 @@ package smartnic_pkg;
 
     parameter logic [7:0] WQE_FLAG_INLINE_DATA = 8'h04; // WQE flags 中表示 inline data 存在的 bit。
     parameter logic [7:0] WQE_FLAG_EXT_SGE     = 8'h08; // WQE flags 中表示使用 extended SGE list 的 bit。
+
+    typedef enum logic [3:0] {
+        SGE_TRAV_STATE_IDLE             = 4'd0,  // 等待新的 SGE stream。
+        SGE_TRAV_STATE_ACCEPT_SGE       = 4'd1,  // 锁存当前 SGE 字段。
+        SGE_TRAV_STATE_CHECK_ZERO_LEN   = 4'd2,  // 检查 SGE length 是否为 0。
+        SGE_TRAV_STATE_CHECK_ADDR       = 4'd3,  // 检查 addr + length 是否溢出。
+        SGE_TRAV_STATE_CHECK_INDEX      = 4'd4,  // 检查 SGE index 是否单调递增且不超过 255。
+        SGE_TRAV_STATE_CHECK_OVERLAP    = 4'd5,  // 与已接受 SGE 范围比较，检查重叠。
+        SGE_TRAV_STATE_EMIT_SEGMENT     = 4'd6,  // 输出规范化 DMA segment。
+        SGE_TRAV_STATE_UPDATE_ACCOUNT   = 4'd7,  // 更新累计长度、byte_offset 和 seen range。
+        SGE_TRAV_STATE_CHECK_TOTAL      = 4'd8,  // last SGE 后检查累计长度是否等于 expected_total_len。
+        SGE_TRAV_STATE_DONE             = 4'd9,  // 当前 SGE list 完成。
+        SGE_TRAV_STATE_ERROR            = 4'd10  // 输出 traversal error。
+    } sge_traversal_state_e;
+
+    typedef enum logic [15:0] {
+        SGE_TRAV_ERR_NONE            = 16'h0000, // 无错误。
+        SGE_TRAV_ERR_ZERO_LENGTH     = 16'h0001, // SGE length 为 0，当前阶段拒绝。
+        SGE_TRAV_ERR_LENGTH_UNDERRUN = 16'h0002, // last 到来时累计长度小于 expected_total_len。
+        SGE_TRAV_ERR_LENGTH_OVERRUN  = 16'h0003, // 累计长度超过 expected_total_len。
+        SGE_TRAV_ERR_TOTAL_OVERFLOW  = 16'h0004, // 总长度累计发生 32-bit 溢出。
+        SGE_TRAV_ERR_ADDR_OVERFLOW   = 16'h0005, // SGE addr + length 溢出。
+        SGE_TRAV_ERR_OVERLAP         = 16'h0006, // 当前 SGE 范围与之前 SGE 范围重叠。
+        SGE_TRAV_ERR_INDEX_ORDER     = 16'h0007, // SGE index 非单调递增或重复。
+        SGE_TRAV_ERR_INDEX_RANGE     = 16'h0008, // SGE index 超过 255。
+        SGE_TRAV_ERR_MISSING_LAST    = 16'h0009, // 已开始 list，但 last 长时间未到。
+        SGE_TRAV_ERR_EXPECTED_LEN    = 16'h000a  // expected_total_len 为 0 或 inline length 不匹配。
+    } sge_traversal_error_e;
 
     // ---------------------------------------------------------------------
     // Completion 完成状态
@@ -1072,6 +1103,21 @@ package smartnic_pkg;
         dma_dispatch_error_e        error_code;       // descriptor 内携带的错误码/预留。
         logic [63:0]                user_context;     // 不透明上下文，供上游关联调试或 completion。
     } dma_desc_t;
+
+    typedef struct packed {
+        logic [15:0]                desc_id;          // 来源 descriptor ID，用于回传错误和 completion。
+        logic [QP_ID_W-1:0]         qpn;              // 该 segment 所属 QPN。
+        logic [VF_ID_W-1:0]         owner_function;   // 拥有该 segment 的 PF/VF function。
+        logic [PD_ID_W-1:0]         pd_id;            // QP/MR 所属 Protection Domain。
+        mr_operation_e              operation;        // 后续 MR checker 使用的访问类型。
+        logic [DMA_SGE_COUNT_W-1:0] sge_index;        // 原始 SGE index，范围 0..255。
+        logic [ADDR_W-1:0]          va;               // SGE 虚拟地址，7.4 再做 MR 翻译。
+        logic [DMA_LEN_W-1:0]       len;              // 当前 segment 长度。
+        logic [KEY_W-1:0]           lkey;             // 当前 SGE 使用的本地 key。
+        logic [15:0]                flags;            // SGE flags，后续保留给 DMA/MR 语义。
+        logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;    // 当前 segment 在整个 WR payload 中的字节偏移。
+        logic                       is_last;          // 该 segment 是否是 WR 的最后一个 SGE。
+    } dma_segment_t;
 
     typedef struct packed {
         logic [VF_ID_W-1:0]         owner_func;      // completion 所属 PF/VF function。
