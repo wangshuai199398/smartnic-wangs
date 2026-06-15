@@ -38,6 +38,7 @@
 | `test_memory_window.py` | `rtl/mr/mr_memory_window_manager.sv` | MW bind/unbind、权限子集、rkey alias、refcount drain、QP error invalidation |
 | `test_mr_integration.py` | `sim/cocotb/mr_integration_tb.sv` | REGISTER_MR -> lookup -> permission -> PD -> VA->PA -> refcount -> DEREGISTER_MR，以及 parent MR -> MW bind -> remote access -> unbind |
 | `test_dma_descriptor_dispatcher.py` | `rtl/dma/dma_descriptor_dispatcher.sv` | SQ/RQ/CQE/fetch descriptor 分发、unsupported opcode、zero length、backpressure、fixed priority |
+| `test_dma_wqe_sge_fetcher.py` | `rtl/dma/dma_wqe_sge_fetcher.sv` | SQ/RQ WQE fetch 地址计算、WQE decode、inline SGE、extended SGE fetch、256 SGE 边界、backpressure |
 
 ## 运行方式
 
@@ -98,6 +99,7 @@ make -C sim/cocotb test-mr-pd-checker
 make -C sim/cocotb test-memory-window
 make -C sim/cocotb test-mr-integration
 make -C sim/cocotb test-dma-descriptor-dispatcher
+make -C sim/cocotb test-dma-wqe-sge-fetcher
 ```
 
 ## 当前限制
@@ -123,3 +125,4 @@ make -C sim/cocotb test-dma-descriptor-dispatcher
 - Memory Window 测试只 mock MR table read/write 和 QP error scan 响应，不实现完整 IBTA Type 1/Type 2 MW、remote invalidate opcode 或真实 QP async event。
 - MR integration 测试使用 Python mock/stub 串起 MR 子模块语义，不实例化完整 MR manager top，不实现真实 DMA Engine、IOMMU、page walk 或 RoCEv2 transport。
 - DMA descriptor dispatcher 测试只验证 descriptor 分流和 backpressure，不执行真实 PCIe read/write、不遍历 SGE、不调用 MR checker，也不实现公平仲裁。
+- DMA WQE/SGE fetcher 测试只验证 host read 请求/响应接口、WQE/SGE decode 和 ready/valid 行为，不实现真实 PCIe read、SGE total-length accounting、zero-overlap validation 或 MR permission check。

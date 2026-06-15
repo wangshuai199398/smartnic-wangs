@@ -72,3 +72,51 @@ CQE write > RQ write > SQ request > WQE fetch > SGE fetch
 - 7.7 会实现 PMTU 和 4KB page boundary split；
 - 7.8 会实现公平仲裁；
 - 7.9 会把 DMA 错误传播到 completion status。
+
+## WQE 和 SGE Fetch
+
+7.2 阶段新增 `rtl/dma/dma_wqe_sge_fetcher.sv`。它负责把 SQ/RQ engine 给出的 queue base、queue index 和 stride 转成 host read 请求：
+
+```text
+wqe_addr = wqe_fetch_base_addr + wqe_fetch_index * wqe_fetch_stride
+```
+
+fetcher 会检查 stride 不能为 0，并检查地址加法 overflow。它通过 `host_read_req_*` 发出读请求，通过 `host_read_resp_*` 接收返回数据。本阶段这个接口只是 RTL 边界，不实现真实 PCIe read。
+
+### WQE Decode
+
+WQE response 会解码出：
+
+- `opcode`
+- `wr_id`
+- `inline_present`
+- `inline_len`
+- `sge_count`
+- inline SGE entries
+- `extended_sge_list_addr`
+
+`inline data` 和 `inline SGE` 是两个不同概念：
+
+- **inline data**：payload 数据直接放在 WQE 中，适合很小的 Send；
+- **inline SGE**：SGE descriptor 直接放在 WQE 中，描述 host buffer 的地址、长度和 lkey。
+
+当前原型格式最多直接输出 2 个 inline SGE。若 `sge_count` 超过 inline SGE 数量，或者 WQE 使用 extended SGE list，则后续通过 `extended_sge_list_addr` 发起 SGE fetch。
+
+### Extended SGE List
+
+SGE fetch 使用：
+
+```text
+sge_addr = sge_fetch_list_base_addr + sge_index * sizeof(sge_t)
+```
+
+每个 `sge_t` 至少包含：
+
+- `addr`
+- `length`
+- `lkey`
+- `flags`
+
+fetcher 逐项输出 `sge_entry_*`，最后输出 `sge_list_done`。`sge_fetch_count` 支持 1 到 256；0 会报错，超过 256 会报 unsupported/too many SGE。
+
+7.2 仍然不做 SGE traversal 的总长度统计、不做 overlap 检查，也不做 MR lookup。它只把 WQE 里的 inline/extended SGE 列表交给后续 7.3。

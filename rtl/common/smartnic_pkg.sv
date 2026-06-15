@@ -133,9 +133,17 @@ package smartnic_pkg;
     parameter logic [11:0] PCIE_EXT_CAP_PTR_SRIOV = 12'h180; // SR-IOV extended capability 起始 byte offset。
 
     parameter int WQE_BYTES       = 64;   // 硬件 WQE 大小，单位为字节。
+    parameter int WQE_W           = WQE_BYTES * 8; // WQE packed 宽度：64 字节 / 512 bit。
     parameter int CQE_BYTES       = 64;   // 硬件 CQE 大小，单位为字节。
     parameter int CQE_W           = CQE_BYTES * 8; // CQE packed 宽度：64 字节 / 512 bit。
     parameter int MAX_SGE         = 256;  // 单个 Work Request 支持的最大 SGE 数量。
+    parameter int DMA_SGE_COUNT_W = 9;    // SGE fetch 请求计数位宽，可表达 0..256。
+    parameter int SGE_BYTES       = 32;   // DMA SGE descriptor 大小，单位为字节。
+    parameter int SGE_W           = SGE_BYTES * 8; // DMA SGE descriptor packed 宽度。
+    parameter int WQE_INLINE_SGE_COUNT = 2; // 7.2 阶段 WQE 内最多直接携带/派生的 inline SGE 数量。
+    parameter int INLINE_DATA_BYTES = 32; // WQE inline payload 预留窗口大小。
+    parameter int INLINE_DATA_W   = INLINE_DATA_BYTES * 8; // inline payload packed 宽度。
+    parameter int DMA_HOST_READ_TAG_W = 16; // fetcher 发起 host read 使用的 tag 位宽。
     parameter int MAX_QP          = 1 << QP_ID_W; // 逻辑 QPN 空间大小。
     parameter int MAX_CQ          = 1 << CQ_ID_W; // 逻辑 CQN 空间大小。
     parameter int MAX_MR          = 1 << 14;      // 初始 MR 表规模目标：16K 条目。
@@ -416,6 +424,66 @@ package smartnic_pkg;
         DMA_DISP_ERR_FUNCTION      = 16'h0003, // owner_function 不在当前 PF/VF function 范围内。
         DMA_DISP_ERR_DIRECTION     = 16'h0004  // opcode 与 direction 不匹配。
     } dma_dispatch_error_e;
+
+    typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
+
+    typedef enum logic [1:0] {
+        QUEUE_TYPE_SQ = 2'd0, // Send Queue WQE。
+        QUEUE_TYPE_RQ = 2'd1  // Receive Queue WQE。
+    } queue_type_e;
+
+    typedef enum logic [2:0] {
+        WQE_FETCH_STATE_IDLE       = 3'd0, // 等待 WQE fetch 请求。
+        WQE_FETCH_STATE_CALC_ADDR  = 3'd1, // 计算 WQE host 地址。
+        WQE_FETCH_STATE_ISSUE_READ = 3'd2, // 发起 WQE host read。
+        WQE_FETCH_STATE_WAIT_RESP  = 3'd3, // 等待 WQE read response。
+        WQE_FETCH_STATE_DECODE     = 3'd4, // 解码 WQE 字段。
+        WQE_FETCH_STATE_RESPOND    = 3'd5, // 输出 WQE fetch response。
+        WQE_FETCH_STATE_ERROR      = 3'd6  // 输出 WQE fetch error。
+    } wqe_fetch_state_e;
+
+    typedef enum logic [3:0] {
+        SGE_FETCH_STATE_IDLE        = 4'd0, // 等待 SGE fetch 请求。
+        SGE_FETCH_STATE_VALIDATE    = 4'd1, // 校验 SGE count/start index。
+        SGE_FETCH_STATE_CALC_ADDR   = 4'd2, // 计算当前 SGE 地址。
+        SGE_FETCH_STATE_ISSUE_READ  = 4'd3, // 发起当前 SGE host read。
+        SGE_FETCH_STATE_WAIT_RESP   = 4'd4, // 等待当前 SGE response。
+        SGE_FETCH_STATE_DECODE      = 4'd5, // 解码 SGE entry。
+        SGE_FETCH_STATE_EMIT        = 4'd6, // 输出当前 SGE entry。
+        SGE_FETCH_STATE_NEXT        = 4'd7, // 推进到下一个 SGE。
+        SGE_FETCH_STATE_DONE        = 4'd8, // 输出 list done。
+        SGE_FETCH_STATE_ERROR       = 4'd9  // 输出 SGE fetch error。
+    } sge_fetch_state_e;
+
+    typedef enum logic [15:0] {
+        WQE_FETCH_ERR_NONE          = 16'h0000, // 无错误。
+        WQE_FETCH_ERR_STRIDE_ZERO   = 16'h0001, // WQE stride 为 0。
+        WQE_FETCH_ERR_ADDR_OVERFLOW = 16'h0002, // WQE 地址计算溢出。
+        WQE_FETCH_ERR_HOST_READ     = 16'h0003, // host read response 报错。
+        WQE_FETCH_ERR_OPCODE        = 16'h0004, // WQE opcode 不支持。
+        WQE_FETCH_ERR_MALFORMED     = 16'h0005  // WQE 字段组合非法。
+    } wqe_fetch_error_e;
+
+    typedef enum logic [15:0] {
+        SGE_FETCH_ERR_NONE          = 16'h0000, // 无错误。
+        SGE_FETCH_ERR_COUNT_ZERO    = 16'h0001, // SGE fetch count 为 0。
+        SGE_FETCH_ERR_TOO_MANY      = 16'h0002, // SGE count 超过 256。
+        SGE_FETCH_ERR_ADDR_OVERFLOW = 16'h0003, // SGE 地址计算溢出。
+        SGE_FETCH_ERR_HOST_READ     = 16'h0004  // host read response 报错。
+    } sge_fetch_error_e;
+
+    typedef enum logic [1:0] {
+        WQE_FETCH_STATUS_OK     = 2'd0, // WQE fetch 成功。
+        WQE_FETCH_STATUS_ERROR  = 2'd1  // WQE fetch 失败。
+    } wqe_fetch_status_e;
+
+    typedef enum logic [1:0] {
+        SGE_FETCH_STATUS_OK     = 2'd0, // SGE fetch 成功。
+        SGE_FETCH_STATUS_ERROR  = 2'd1  // SGE fetch 失败。
+    } sge_fetch_status_e;
+
+    parameter logic [7:0] WQE_FLAG_INLINE_DATA = 8'h04; // WQE flags 中表示 inline data 存在的 bit。
+    parameter logic [7:0] WQE_FLAG_EXT_SGE     = 8'h08; // WQE flags 中表示使用 extended SGE list 的 bit。
 
     // ---------------------------------------------------------------------
     // Completion 完成状态
@@ -869,6 +937,38 @@ package smartnic_pkg;
     // ---------------------------------------------------------------------
     // Packed 数据结构
     // ---------------------------------------------------------------------
+
+    typedef struct packed {
+        logic [ADDR_W-1:0]          addr;            // SGE 指向的 host 虚拟地址。
+        logic [DMA_LEN_W-1:0]       length;          // 该 SGE 覆盖的字节数。
+        logic [KEY_W-1:0]           lkey;            // 访问该 SGE 使用的 local key。
+        logic [15:0]                flags;           // SGE flags，后续用于只读、last、invalidate 等语义。
+        logic [111:0]               reserved;        // 保留位，保证 sge_t 为 32 字节。
+    } sge_t;
+
+    typedef struct packed {
+        logic [INLINE_DATA_W-1:0]   data;            // WQE 中直接携带的 inline payload 数据。
+    } inline_data_t;
+
+    typedef struct packed {
+        wqe_opcode_e                opcode;          // Work Request 操作类型。
+        logic [7:0]                 flags;           // WR flags，含 inline data / extended SGE list 标志。
+        logic [DMA_SGE_COUNT_W-1:0] sge_count;       // WR 引用的 SGE 总数，最大 256。
+        logic [1:0]                 inline_sge_count;// WQE 内可直接派生/携带的 inline SGE 数量。
+        logic                       inline_present;  // inline payload 是否存在。
+        logic [15:0]                inline_len;      // inline payload 长度。
+        logic [WR_ID_W-1:0]         wr_id;           // 应用传入的不透明 WR ID。
+        logic [ADDR_W-1:0]          local_va;        // 第一个本地 buffer 或 inline SGE 地址。
+        logic [KEY_W-1:0]           lkey;            // 第一个本地 SGE lkey。
+        logic [DMA_LEN_W-1:0]       length;          // WR 总长度。
+        logic [ADDR_W-1:0]          remote_va;       // RDMA Read/Write 远端虚拟地址。
+        logic [KEY_W-1:0]           rkey;            // RDMA Read/Write 远端 rkey。
+        logic [31:0]                imm_data;        // immediate data。
+        logic [ADDR_W-1:0]          extended_sge_list_addr; // extended SGE list host 地址。
+        logic [83:0]                reserved;        // 保留位，保证 send_wqe_t 为 64 字节。
+    } send_wqe_t;
+
+    typedef send_wqe_t recv_wqe_t; // 当前阶段 Recv WQE 复用同一基础格式。
 
     typedef struct packed {
         rdma_opcode_e              opcode;          // Work Request 操作类型。
