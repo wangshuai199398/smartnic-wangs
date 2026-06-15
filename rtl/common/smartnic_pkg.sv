@@ -336,6 +336,44 @@ package smartnic_pkg;
         MR_PD_CHECK_ERR_MW_PARENT_PD      = 16'h0007  // MW parent PD mismatch 预留。
     } mr_pd_check_error_e;
 
+    typedef enum logic [4:0] {
+        MW_STATE_IDLE                       = 5'd0,  // 等待 bind/unbind/QP error invalidate 请求。
+        MW_STATE_LOOKUP_PARENT_MR           = 5'd1,  // 按 parent_lkey 读取父 MR。
+        MW_STATE_VALIDATE_PARENT            = 5'd2,  // 校验父 MR valid/owner/PD/pending/MW。
+        MW_STATE_VALIDATE_RANGE             = 5'd3,  // 校验 bind VA/length 落在父 MR 范围内。
+        MW_STATE_VALIDATE_PERMISSION_SUBSET = 5'd4,  // 校验 MW 权限是父 MR 权限子集。
+        MW_STATE_CHECK_ALIAS                = 5'd5,  // 按 mw_rkey 检查 key alias。
+        MW_STATE_BUILD_MW_ENTRY             = 5'd6,  // 构造 Memory Window entry。
+        MW_STATE_WRITE_MW_ENTRY             = 5'd7,  // 写入 Memory Window entry。
+        MW_STATE_LOOKUP_MW                  = 5'd8,  // unbind 时按 mw_rkey 查找 MW。
+        MW_STATE_CHECK_PERMISSION           = 5'd9,  // unbind 时检查 owner/PD/MW 类型。
+        MW_STATE_MARK_INVALIDATING          = 5'd10, // 设置 pending_deregister/invalidating。
+        MW_STATE_WAIT_REFCOUNT_ZERO         = 5'd11, // 等待 MW refcount drain。
+        MW_STATE_CLEAR_MW_ENTRY             = 5'd12, // 清除 MW entry valid。
+        MW_STATE_QP_SCAN                    = 5'd13, // QP error invalidation 扫描相关 MW。
+        MW_STATE_RESPOND                    = 5'd14, // 返回响应。
+        MW_STATE_ERROR                      = 5'd15  // 返回错误。
+    } mw_state_e;
+
+    typedef enum logic [15:0] {
+        MW_ERR_NONE               = 16'h0000, // 无错误。
+        MW_ERR_PARENT_MISS        = 16'h0001, // parent_lkey lookup miss。
+        MW_ERR_PARENT_PENDING     = 16'h0002, // parent MR 正在注销。
+        MW_ERR_PARENT_IS_MW       = 16'h0003, // 禁止 MW over MW。
+        MW_ERR_RANGE              = 16'h0004, // bind 范围超出 parent MR 或地址溢出。
+        MW_ERR_LENGTH             = 16'h0005, // bind length 为 0。
+        MW_ERR_RKEY               = 16'h0006, // mw_rkey 为 0。
+        MW_ERR_ALIAS              = 16'h0007, // mw_rkey alias。
+        MW_ERR_PERMISSION_SUBSET  = 16'h0008, // MW 权限不是 parent MR 权限子集。
+        MW_ERR_OWNER              = 16'h0009, // owner_function mismatch。
+        MW_ERR_PD                 = 16'h000a, // PD mismatch。
+        MW_ERR_MW_MISS            = 16'h000b, // unbind mw_rkey lookup miss。
+        MW_ERR_NOT_MW             = 16'h000c, // unbind 目标不是 Memory Window。
+        MW_ERR_TIMEOUT            = 16'h000d, // refcount drain 或 QP invalidation 超时。
+        MW_ERR_TABLE              = 16'h000e, // MR table read/write 返回其他错误。
+        MW_ERR_UNSUPPORTED_FLAGS  = 16'h000f  // 当前阶段不支持的 MW 权限位。
+    } mw_error_e;
+
     // ---------------------------------------------------------------------
     // Completion 完成状态
     // ---------------------------------------------------------------------
@@ -962,6 +1000,8 @@ package smartnic_pkg;
         logic [MR_REFCOUNT_W-1:0]   refcount;          // 正在进行的 DMA 引用数量。
         logic                       pending_deregister;// 已请求注销，等待 refcount 清零。
         logic                       memory_window;     // 1 表示 Memory Window 表项，绑定规则留给 6.7。
+        logic                       invalidating;       // MW 正在 unbind 或 QP error invalidation。
+        logic [QP_ID_W-1:0]         bound_qpn;          // 绑定该 MW 的 QPN，用于 QP error invalidation。
         logic [KEY_W-1:0]           parent_mr_key;     // Memory Window 绑定的父 MR key，6.7 使用。
         logic                       error_state;       // 该 MR 是否处于错误状态。
         logic [15:0]                error_code;        // MR 最近一次错误码。

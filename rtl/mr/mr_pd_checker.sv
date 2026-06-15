@@ -99,7 +99,7 @@ module mr_pd_checker (
 
         if (!pd_check_mr_entry.valid) begin
             error_next = MR_PD_CHECK_ERR_INVALID_ENTRY;
-        end else if (pd_check_mr_entry.pending_deregister) begin
+        end else if (pd_check_mr_entry.pending_deregister || pd_check_mr_entry.invalidating) begin
             error_next = MR_PD_CHECK_ERR_PENDING;
         end else if (!owner_ok) begin
             error_next = MR_PD_CHECK_ERR_PERMISSION;

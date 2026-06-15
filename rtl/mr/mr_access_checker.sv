@@ -128,7 +128,7 @@ module mr_access_checker (
 
         if (!access_check_entry.valid) begin
             error_next = MR_ACCESS_ERR_INVALID_ENTRY;
-        end else if (access_check_entry.pending_deregister) begin
+        end else if (access_check_entry.pending_deregister || access_check_entry.invalidating) begin
             error_next = MR_ACCESS_ERR_PENDING;
         end else if (!owner_ok) begin
             error_next = MR_ACCESS_ERR_PERMISSION;

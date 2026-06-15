@@ -348,6 +348,8 @@ module mr_registration_manager (
                     mr_entry_reg.refcount <= '0;
                     mr_entry_reg.pending_deregister <= 1'b0;
                     mr_entry_reg.memory_window <= 1'b0;
+                    mr_entry_reg.invalidating <= 1'b0;
+                    mr_entry_reg.bound_qpn <= '0;
                     mr_entry_reg.parent_mr_key <= '0;
                     mr_entry_reg.error_state <= 1'b0;
                     mr_entry_reg.error_code <= 16'h0000;

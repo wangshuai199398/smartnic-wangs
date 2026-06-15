@@ -50,6 +50,8 @@ MR_ENTRY_FIELDS = [
     ("refcount", 16),
     ("pending_deregister", 1),
     ("memory_window", 1),
+    ("invalidating", 1),
+    ("bound_qpn", 24),
     ("parent_mr_key", 32),
     ("error_state", 1),
     ("error_code", 16),

@@ -140,6 +140,7 @@ module mr_deregistration_manager (
         begin
             make_pending_entry = entry;
             make_pending_entry.pending_deregister = 1'b1;
+            make_pending_entry.invalidating = 1'b1;
         end
     endfunction
 
@@ -150,6 +151,8 @@ module mr_deregistration_manager (
             make_cleared_entry.access_flags = '0;
             make_cleared_entry.refcount = '0;
             make_cleared_entry.pending_deregister = 1'b0;
+            make_cleared_entry.invalidating = 1'b0;
+            make_cleared_entry.bound_qpn = '0;
             make_cleared_entry.error_state = 1'b0;
             make_cleared_entry.error_code = 16'h0000;
         end

@@ -382,6 +382,78 @@ PD 检查规则：
 
 这样设计的好处是每一道检查职责很窄：`mr_key_checker` 只回答“key 用法对不对”，`mr_access_checker` 只回答“这个 MR 允许这种操作吗”，`mr_pd_checker` 只回答“这个 QP 和这个 MR 是否属于同一个保护域”。后续 SQ engine、RQ engine 和 transport remote operation 只需要把 QP context 中的 `pd_id` 传入 MR pipeline，就能统一复用这套保护逻辑。
 
+## Memory Window
+
+6.7 阶段加入 `rtl/mr/mr_memory_window_manager.sv`。Memory Window，简称 MW，是从 parent MR 派生出来的、更窄的远端访问窗口。它复用 MR table entry 格式，但 `memory_window = 1`，并记录：
+
+- `parent_mr_key`：绑定来源 parent MR 的 lkey；
+- `bound_qpn`：绑定这个 MW 的 QPN；
+- `rkey`：给远端使用的 MW rkey；
+- `virtual_base_addr` / `length`：MW 暴露的 VA 范围；
+- `physical_base_addr`：由 parent MR 的 PA 加 offset 得到；
+- `access_flags`：MW 自己允许的远端访问权限；
+- `invalidating`：unbind 或 QP error cleanup 正在使 MW 失效。
+
+### Bind 流程
+
+```text
+MW_BIND request
+  -> lookup parent MR by parent_lkey
+  -> validate parent valid / owner / PD / not pending / not MW
+  -> validate bind range inside parent MR
+  -> validate MW permission subset
+  -> check mw_rkey alias
+  -> write MW entry into MR table
+  -> response
+```
+
+当前阶段禁止 MW over MW。如果 `design.md` 后续明确支持，再把 `parent.memory_window` 的检查改成允许并递归校验 parent chain。
+
+### Permission Subset
+
+MW 不能扩大 parent MR 权限。也就是说：
+
+- MW 请求 `REMOTE_READ` 时，parent MR 必须有 `MR_ACCESS_REMOTE_READ`；
+- MW 请求 `REMOTE_WRITE` 时，parent MR 必须有 `MR_ACCESS_REMOTE_WRITE`；
+- MW 请求 `REMOTE_ATOMIC` 时，parent MR 必须有 `MR_ACCESS_REMOTE_ATOMIC`；
+- 当前阶段默认拒绝 MW 自己携带 `MR_ACCESS_MW_BIND`；
+- 本地 read/write 权限暂不作为 MW 远端暴露权限使用。
+
+这样远端拿到 MW rkey 后，只能访问 parent MR 中被显式缩小出来的一段地址和权限集合，不能靠 MW 获得 parent MR 没有授予的能力。
+
+### Unbind 流程
+
+```text
+MW_UNBIND request
+  -> lookup MW by mw_rkey
+  -> require entry.valid && entry.memory_window
+  -> check owner_function and PD
+  -> set pending_deregister / invalidating
+  -> wait refcount == 0
+  -> clear MW entry.valid
+  -> response
+```
+
+unbind 不清除 parent MR，也不改变 parent MR refcount。当前设计假设绑定期间不增加 parent MR refcount；后续如果加入 parent pin/drain 语义，可以在 bind/unbind 状态机中补 parent refcount 操作。
+
+### QP Error Invalidation
+
+当绑定 MW 的 QP 进入 ERR 或 cleanup，硬件需要使相关 MW 失效，避免出错 QP 的 rkey 继续可用。6.7 阶段提供最小框架：
+
+```text
+QP error invalidate
+  -> scan MW entries by bound_qpn / owner_function / PD
+  -> mark matching MW pending_deregister + invalidating
+  -> wait refcount drain
+  -> clear MW entry
+```
+
+当前 RTL 暴露 `mw_scan_*` 预留接口，由后续 top 或 MR table scanner 接入真实扫描。本阶段测试用 mock scan 响应验证控制状态机。
+
+### 与访问路径的关系
+
+`mr_key_checker` 按 rkey 查到 MW entry 时，不回退 parent MR；`mr_access_checker` 使用 MW entry 自己的 `access_flags`、range 和 `physical_base_addr`；`mr_pd_checker` 使用 MW entry 的 `pd_id`。如果 MW 正在 `pending_deregister` 或 `invalidating`，新访问会被拒绝。
+
 ## 后续连接
 
 - 6.2 MR registration 会通过写接口创建 MR entry；

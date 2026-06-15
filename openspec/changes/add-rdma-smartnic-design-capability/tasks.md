@@ -53,8 +53,8 @@
 - [x] 6.4 Implement local lkey and remote rkey direction checks.
 - [x] 6.5 Implement access permission checks for local read/write, remote read/write, remote atomic, and memory window bind.
 - [x] 6.6 Implement protection domain checks for local and remote operations.
-- [ ] 6.7 Implement memory window bind, unbind, permission subset validation, and invalidation on QP error where required.
-- [ ] 6.8 Add MR tests for registration, deregistration, translation, bounds rejection, PD mismatch, key direction, permission rejection, and memory window binding.
+- [x] 6.7 Implement memory window bind, unbind, permission subset validation, and invalidation on QP error where required.
+- [x] 6.8 Add MR tests for registration, deregistration, translation, bounds rejection, PD mismatch, key direction, permission rejection, and memory window binding.
 
 ## 7. Scatter-Gather DMA Engine
 

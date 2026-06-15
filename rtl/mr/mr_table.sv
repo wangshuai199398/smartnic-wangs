@@ -189,7 +189,7 @@ module mr_table (
             if (!owner_allowed(entry, function_id, admin_bypass)) begin
                 return MR_TABLE_STATUS_PERMISSION;
             end
-            if (block_pending && entry.pending_deregister) begin
+            if (block_pending && (entry.pending_deregister || entry.invalidating)) begin
                 return MR_TABLE_STATUS_PENDING;
             end
             return MR_TABLE_STATUS_OK;

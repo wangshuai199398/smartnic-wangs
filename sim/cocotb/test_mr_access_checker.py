@@ -49,6 +49,8 @@ MR_ENTRY_FIELDS = [
     ("refcount", 16),
     ("pending_deregister", 1),
     ("memory_window", 1),
+    ("invalidating", 1),
+    ("bound_qpn", 24),
     ("parent_mr_key", 32),
     ("error_state", 1),
     ("error_code", 16),
@@ -78,6 +80,8 @@ def pack_mr_entry(**overrides):
         "refcount": 0,
         "pending_deregister": 0,
         "memory_window": 0,
+        "invalidating": 0,
+        "bound_qpn": 0,
         "parent_mr_key": 0,
         "error_state": 0,
         "error_code": 0,
@@ -262,12 +266,23 @@ async def invalid_pending_zero_length_bounds_and_owner_are_rejected(dut):
 
     invalid = await check_access(dut, entry=pack_mr_entry(valid=0))
     pending = await check_access(dut, entry=pack_mr_entry(pending_deregister=1))
+    invalidating_mw = await check_access(
+        dut,
+        operation=MR_OP_REMOTE_READ,
+        remote=1,
+        entry=pack_mr_entry(
+            memory_window=1,
+            invalidating=1,
+            access_flags=MR_ACCESS_REMOTE_READ,
+        ),
+    )
     zero_len = await check_access(dut, length=0)
     bounds = await check_access(dut, va=0x1000_0FF0, length=0x20)
     owner = await check_access(dut, owner=2)
 
     assert invalid["error"] == MR_ACCESS_ERR_INVALID_ENTRY
     assert pending["error"] == MR_ACCESS_ERR_PENDING
+    assert invalidating_mw["error"] == MR_ACCESS_ERR_PENDING
     assert zero_len["error"] == MR_ACCESS_ERR_LENGTH
     assert bounds["error"] == MR_ACCESS_ERR_BOUNDS
     assert owner["error"] == MR_ACCESS_ERR_PERMISSION

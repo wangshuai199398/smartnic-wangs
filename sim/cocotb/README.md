@@ -35,6 +35,8 @@
 | `test_mr_key_checker.py` | `rtl/mr/mr_key_checker.sv` | 本地 lkey、远端 rkey、方向错误、pending、权限、zero length、bounds 错误 |
 | `test_mr_access_checker.py` | `rtl/mr/mr_access_checker.sv` | local/remote/MW access_flags 权限、pending、owner、zero length、bounds、overflow 错误 |
 | `test_mr_pd_checker.py` | `rtl/mr/mr_pd_checker.sv` | QP PD 与 MR PD 匹配、PD mismatch、owner、pending、invalid entry、invalid operation、PA 透传 |
+| `test_memory_window.py` | `rtl/mr/mr_memory_window_manager.sv` | MW bind/unbind、权限子集、rkey alias、refcount drain、QP error invalidation |
+| `test_mr_integration.py` | `sim/cocotb/mr_integration_tb.sv` | REGISTER_MR -> lookup -> permission -> PD -> VA->PA -> refcount -> DEREGISTER_MR，以及 parent MR -> MW bind -> remote access -> unbind |
 
 ## 运行方式
 
@@ -90,6 +92,8 @@ make -C sim/cocotb test-mr-deregistration
 make -C sim/cocotb test-mr-key-checker
 make -C sim/cocotb test-mr-access-checker
 make -C sim/cocotb test-mr-pd-checker
+make -C sim/cocotb test-memory-window
+make -C sim/cocotb test-mr-integration
 ```
 
 ## 当前限制
@@ -112,3 +116,5 @@ make -C sim/cocotb test-mr-pd-checker
 - MR key checker 测试只验证 lkey/rkey 使用方向和 MR table check 状态映射，不实现 access_flags 权限矩阵、完整 PD 规则或 Memory Window bind。
 - MR access checker 测试只验证 `access_flags` 权限矩阵和基础 bounds/owner/pending 检查，不实现完整 PD mismatch、Memory Window bind/unbind 或 QP error invalidation。
 - MR PD checker 测试只验证 QP PD 与 MR PD 的最后一道匹配检查，不实现按 QPN 查询 QP context、remote requester identity 或 PF admin override。
+- Memory Window 测试只 mock MR table read/write 和 QP error scan 响应，不实现完整 IBTA Type 1/Type 2 MW、remote invalidate opcode 或真实 QP async event。
+- MR integration 测试使用 Python mock/stub 串起 MR 子模块语义，不实例化完整 MR manager top，不实现真实 DMA Engine、IOMMU、page walk 或 RoCEv2 transport。
