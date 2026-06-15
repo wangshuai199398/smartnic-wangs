@@ -362,6 +362,18 @@ armed_clear_update
 
 如果 `solicited_only = 1`，只有 `cqe_commit_solicited = 1` 的 completion 可以触发通知。非 solicited completion 仍然写入 CQ ring，但不会触发 MSI-X。这对应 libibverbs 中 request notification 时常见的 solicited event 语义。
 
+## CQ Arm Race 约定
+
+当前阶段采用简单、可验证的 race 语义：
+
+- CQE 写入路径只推进 `producer_index`；
+- CQ arm Doorbell 只更新 `consumer_index`、`armed` 和 `solicited_only`；
+- 如果 CQE producer update 与 CQ arm update 同周期发生，两个更新作用在不同字段上，不能互相覆盖；
+- 软件更新 `consumer_index` 时，硬件已有的 `producer_index` 保持不变；
+- 如果 CQ arm 发生时 CQ ring 中已经存在未通知 CQE，当前实现不会 retroactive 立即生成 MSI-X，而是等待下一次 CQE commit 或 moderation timer 事件触发通知判断。
+
+这样设计是为了让 5.x 阶段保持模块边界清晰：CQ context table 只保存状态，`cq_notification` 只响应 CQE commit/timer，不额外扫描 CQ ring。后续如果需要更贴近某些 verbs provider 的 re-arm 语义，可以在 CQ arm path 增加“arm 后检查未通知 CQE”的显式接口。
+
 ## Interrupt Moderation
 
 `moderation_count` 用来按 completion 数量合并中断：

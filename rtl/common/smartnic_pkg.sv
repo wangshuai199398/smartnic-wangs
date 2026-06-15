@@ -144,6 +144,20 @@ package smartnic_pkg;
     parameter int QP_TABLE_INDEX_W = 10;          // QP context 表 slot 索引位宽，覆盖 1024 项。
     parameter int CQ_TABLE_DEPTH  = 1024;         // 原型阶段片上 CQ context 表项数量。
     parameter int CQ_TABLE_INDEX_W = 10;          // CQ context 表 slot 索引位宽，覆盖 1024 项。
+    parameter int MR_TABLE_DEPTH  = 1024;         // 原型阶段片上 MR 表项数量。
+    parameter int MR_TABLE_INDEX_W = 10;          // MR 表 slot 索引位宽，覆盖 1024 项。
+    parameter int MR_REFCOUNT_W   = 16;           // MR in-flight DMA 引用计数位宽。
+    parameter int SG_ENTRY_BYTES  = 32;           // pinned SG entry 格式大小，单位为字节。
+    parameter int SG_ENTRY_W      = SG_ENTRY_BYTES * 8; // pinned SG entry packed 宽度。
+    parameter int MR_REG_MAX_SG_ENTRIES = 1;      // 6.2 阶段只支持单段/线性 SG list。
+    parameter logic [5:0] MR_ACCESS_LOCAL_READ    = 6'b000001; // 本地 DMA read 权限 bit。
+    parameter logic [5:0] MR_ACCESS_LOCAL_WRITE   = 6'b000010; // 本地 DMA write / Recv write 权限 bit。
+    parameter logic [5:0] MR_ACCESS_REMOTE_READ   = 6'b000100; // 远端 RDMA Read 权限 bit。
+    parameter logic [5:0] MR_ACCESS_REMOTE_WRITE  = 6'b001000; // 远端 RDMA Write 权限 bit。
+    parameter logic [5:0] MR_ACCESS_REMOTE_ATOMIC = 6'b010000; // 远端 Atomic 权限 bit。
+    parameter logic [5:0] MR_ACCESS_MW_BIND       = 6'b100000; // Memory Window bind 权限 bit。
+    parameter logic [5:0] MR_ACCESS_FLAGS_ALLOWED = 6'h3f; // 当前定义的 MR access flags 位图。
+    parameter int MR_DEREG_TIMEOUT_CYCLES = 1024; // deregistration 等待 refcount drain 的超时周期。
 
     // ---------------------------------------------------------------------
     // RDMA Work Request 操作码
@@ -201,6 +215,126 @@ package smartnic_pkg;
         CQ_TABLE_STATUS_FULL       = 4'd4, // 新建 CQ context 时没有空闲表项。
         CQ_TABLE_STATUS_INVALID    = 4'd5  // 输入字段或上游更新无效。
     } cq_table_status_e;
+
+    typedef enum logic [3:0] {
+        MR_TABLE_STATUS_OK         = 4'd0, // MR 表访问成功。
+        MR_TABLE_STATUS_MISS       = 4'd1, // 按 lkey/rkey 查找未命中。
+        MR_TABLE_STATUS_PERMISSION = 4'd2, // function 与 owner_function 不匹配。
+        MR_TABLE_STATUS_ALIAS      = 4'd3, // lkey 或 rkey 在多个有效表项中重复。
+        MR_TABLE_STATUS_FULL       = 4'd4, // 新建 MR entry 时没有空闲表项。
+        MR_TABLE_STATUS_INVALID    = 4'd5, // 输入字段无效。
+        MR_TABLE_STATUS_BOUNDS     = 4'd6, // VA/length 超出 MR 范围或地址加法溢出。
+        MR_TABLE_STATUS_LENGTH     = 4'd7, // check_len 为 0 或 length 字段无效。
+        MR_TABLE_STATUS_REF_OVER   = 4'd8, // refcount 增加时溢出。
+        MR_TABLE_STATUS_REF_UNDER  = 4'd9, // refcount 减少时下溢。
+        MR_TABLE_STATUS_PENDING    = 4'd10 // MR 正在注销，不允许新的 lookup/check。
+    } mr_table_status_e;
+
+    typedef enum logic [3:0] {
+        MR_REG_STATE_IDLE          = 4'd0, // 等待 REGISTER_MR 请求。
+        MR_REG_STATE_VALIDATE_REQ  = 4'd1, // 校验请求字段。
+        MR_REG_STATE_ALLOC_ENTRY   = 4'd2, // 选择空闲 MR table slot。
+        MR_REG_STATE_FETCH_SG      = 4'd3, // 发起 pinned SG entry fetch。
+        MR_REG_STATE_VALIDATE_SG   = 4'd4, // 校验 SG entry。
+        MR_REG_STATE_BUILD_ENTRY   = 4'd5, // 构造 mr_entry_t。
+        MR_REG_STATE_WRITE_TABLE   = 4'd6, // 写入 MR table。
+        MR_REG_STATE_RESPOND       = 4'd7, // 返回成功响应。
+        MR_REG_STATE_ERROR         = 4'd8  // 返回错误响应。
+    } mr_registration_state_e;
+
+    typedef enum logic [15:0] {
+        MR_REG_ERR_NONE            = 16'h0000, // 无错误。
+        MR_REG_ERR_LENGTH          = 16'h0001, // 注册 length 为 0 或 SG length 不足。
+        MR_REG_ERR_PAGE_SIZE       = 16'h0002, // page_size 不合法或与 SG entry 不匹配。
+        MR_REG_ERR_VA_ALIGN        = 16'h0003, // virtual_base_addr 未按 page_size 对齐。
+        MR_REG_ERR_SG_COUNT        = 16'h0004, // sg_entry_count 为 0。
+        MR_REG_ERR_UNSUPPORTED_SG  = 16'h0005, // 当前阶段不支持多段 SG list。
+        MR_REG_ERR_ACCESS_FLAGS    = 16'h0006, // access_flags 包含未知 bit。
+        MR_REG_ERR_KEY             = 16'h0007, // lkey/rkey 为 0。
+        MR_REG_ERR_FUNCTION        = 16'h0008, // owner function 未启用或不合法。
+        MR_REG_ERR_TABLE_FULL      = 16'h0009, // MR table 没有空闲 entry。
+        MR_REG_ERR_ALIAS           = 16'h000a, // lkey/rkey alias。
+        MR_REG_ERR_SG_FETCH        = 16'h000b, // SG entry fetch 失败。
+        MR_REG_ERR_PA_ALIGN        = 16'h000c, // physical_base_addr 未按 page_size 对齐。
+        MR_REG_ERR_PA_OVERFLOW     = 16'h000d, // physical_base_addr + length 溢出。
+        MR_REG_ERR_TABLE_WRITE     = 16'h000e  // MR table 写入返回其他错误。
+    } mr_registration_error_e;
+
+    typedef enum logic [3:0] {
+        MR_DEREG_STATE_IDLE        = 4'd0, // 等待 DEREGISTER_MR 请求。
+        MR_DEREG_STATE_LOOKUP      = 4'd1, // 通过 MR table read 查找 MR。
+        MR_DEREG_STATE_CHECK       = 4'd2, // 检查 owner、PD、pending 状态。
+        MR_DEREG_STATE_MARK_PENDING= 4'd3, // 写回 pending_deregister=1。
+        MR_DEREG_STATE_WAIT_ZERO   = 4'd4, // 等待 refcount drain 到 0。
+        MR_DEREG_STATE_CLEAR_ENTRY = 4'd5, // 清除 valid/refcount/access flags 等字段。
+        MR_DEREG_STATE_RESPOND     = 4'd6, // 返回成功响应。
+        MR_DEREG_STATE_ERROR       = 4'd7  // 返回错误响应。
+    } mr_deregistration_state_e;
+
+    typedef enum logic [15:0] {
+        MR_DEREG_ERR_NONE          = 16'h0000, // 无错误。
+        MR_DEREG_ERR_INVALID_KEY   = 16'h0001, // deregister key 为 0。
+        MR_DEREG_ERR_LOOKUP_MISS   = 16'h0002, // MR lookup/read 未命中。
+        MR_DEREG_ERR_PERMISSION    = 16'h0003, // owner_function 不匹配。
+        MR_DEREG_ERR_PD_MISMATCH   = 16'h0004, // 请求 PD 与 MR entry PD 不匹配。
+        MR_DEREG_ERR_PENDING       = 16'h0005, // MR 已经处于 pending_deregister。
+        MR_DEREG_ERR_TIMEOUT       = 16'h0006, // 等待 refcount drain 超时。
+        MR_DEREG_ERR_REFCOUNT      = 16'h0007, // refcount 非法状态。
+        MR_DEREG_ERR_TABLE_WRITE   = 16'h0008  // MR table 写回失败。
+    } mr_deregistration_error_e;
+
+    typedef enum logic [3:0] {
+        MR_OP_LOCAL_DMA_READ       = 4'd0, // 本地 DMA 读取 host buffer，例如 Send/RDMA Write payload read。
+        MR_OP_LOCAL_DMA_WRITE      = 4'd1, // 本地 DMA 写 host buffer，例如 RDMA Read response 写入。
+        MR_OP_LOCAL_RECV_WRITE     = 4'd2, // Recv path 将入站 Send payload 写入本地 Recv buffer。
+        MR_OP_REMOTE_RDMA_READ     = 4'd3, // 对端 RDMA Read 读取本端内存。
+        MR_OP_REMOTE_RDMA_WRITE    = 4'd4, // 对端 RDMA Write 写入本端内存。
+        MR_OP_REMOTE_ATOMIC        = 4'd5, // 对端 atomic 操作，后续阶段检查权限。
+        MR_OP_MW_BIND              = 4'd6  // Memory Window bind，方向/权限细节留给 6.7。
+    } mr_operation_e;
+
+    localparam mr_operation_e MR_OP_LOCAL_READ   = MR_OP_LOCAL_DMA_READ;    // 6.5 权限检查短别名。
+    localparam mr_operation_e MR_OP_LOCAL_WRITE  = MR_OP_LOCAL_DMA_WRITE;   // 6.5 权限检查短别名。
+    localparam mr_operation_e MR_OP_REMOTE_READ  = MR_OP_REMOTE_RDMA_READ;  // 6.5 权限检查短别名。
+    localparam mr_operation_e MR_OP_REMOTE_WRITE = MR_OP_REMOTE_RDMA_WRITE; // 6.5 权限检查短别名。
+
+    typedef enum logic [15:0] {
+        MR_KEY_CHECK_ERR_NONE                = 16'h0000, // key 方向和 table check 均成功。
+        MR_KEY_CHECK_ERR_INVALID_KEY         = 16'h0001, // key 为 0。
+        MR_KEY_CHECK_ERR_LOCAL_KEY_REQUIRED  = 16'h0002, // 本地操作必须使用 lkey。
+        MR_KEY_CHECK_ERR_REMOTE_KEY_REQUIRED = 16'h0003, // 远端操作必须使用 rkey。
+        MR_KEY_CHECK_ERR_INVALID_OPERATION   = 16'h0004, // operation 未定义或当前阶段不支持。
+        MR_KEY_CHECK_ERR_LOOKUP_MISS         = 16'h0005, // lkey/rkey lookup 未命中。
+        MR_KEY_CHECK_ERR_PERMISSION          = 16'h0006, // owner_function 不匹配。
+        MR_KEY_CHECK_ERR_PENDING             = 16'h0007, // MR 正在 pending_deregister。
+        MR_KEY_CHECK_ERR_LENGTH              = 16'h0008, // 访问长度为 0 或 MR 长度非法。
+        MR_KEY_CHECK_ERR_BOUNDS              = 16'h0009, // VA/len 超出 MR 范围。
+        MR_KEY_CHECK_ERR_TABLE               = 16'h000a  // MR table 返回其他错误。
+    } mr_key_check_error_e;
+
+    typedef enum logic [15:0] {
+        MR_ACCESS_ERR_NONE              = 16'h0000, // access_flags 和基础合法性检查成功。
+        MR_ACCESS_ERR_INVALID_ENTRY     = 16'h0001, // MR entry 无效。
+        MR_ACCESS_ERR_PENDING           = 16'h0002, // MR 正在 pending_deregister。
+        MR_ACCESS_ERR_PERMISSION        = 16'h0003, // owner_function 不匹配。
+        MR_ACCESS_ERR_LENGTH            = 16'h0004, // 访问长度为 0 或 MR 长度非法。
+        MR_ACCESS_ERR_BOUNDS            = 16'h0005, // VA/len 超出 MR 范围。
+        MR_ACCESS_ERR_ADDR_OVERFLOW     = 16'h0006, // 地址加法溢出。
+        MR_ACCESS_ERR_ACCESS_DENIED     = 16'h0007, // operation 对应的 access flag 未置位。
+        MR_ACCESS_ERR_UNKNOWN_OPERATION = 16'h0008, // operation 未定义。
+        MR_ACCESS_ERR_MW_PARENT         = 16'h0009  // MW 权限超过 parent mask，完整逻辑留给 6.7。
+    } mr_access_check_error_e;
+
+    typedef enum logic [15:0] {
+        MR_PD_CHECK_ERR_NONE              = 16'h0000, // PD 检查成功。
+        MR_PD_CHECK_ERR_INVALID_ENTRY     = 16'h0001, // MR entry 无效。
+        MR_PD_CHECK_ERR_PENDING           = 16'h0002, // MR 正在 pending_deregister。
+        MR_PD_CHECK_ERR_PERMISSION        = 16'h0003, // owner_function 不匹配。
+        MR_PD_CHECK_ERR_MISSING_QP_PD     = 16'h0004, // 调用方未提供有效 QP PD。
+        MR_PD_CHECK_ERR_PD_MISMATCH       = 16'h0005, // QP PD 与 MR PD 不匹配。
+        MR_PD_CHECK_ERR_INVALID_OPERATION = 16'h0006, // operation 未定义。
+        MR_PD_CHECK_ERR_MW_PARENT_PD      = 16'h0007  // MW parent PD mismatch 预留。
+    } mr_pd_check_error_e;
 
     // ---------------------------------------------------------------------
     // Completion 完成状态
@@ -755,6 +889,15 @@ package smartnic_pkg;
     } qp_flush_completion_req_t;
 
     typedef struct packed {
+        logic [ADDR_W-1:0]          physical_base_addr; // pinned 物理/DMA 段起始地址。
+        logic [DMA_LEN_W-1:0]       length;             // 该 SG entry 覆盖的字节数。
+        logic [31:0]                page_count;         // 该段包含的页数量。
+        logic [PAGE_SHIFT_W-1:0]    page_size;          // 页大小 log2(bytes)。
+        logic [15:0]                flags;              // pinned/只读/调试等 SG 标志预留。
+        logic [105:0]               reserved;           // 保留位，保证 SG entry 为 32 字节。
+    } sg_entry_t;
+
+    typedef struct packed {
         logic                       valid;          // QP 上下文条目已分配。
         logic [VF_ID_W-1:0]         owner_func;     // 拥有该 QP 的 PF/VF function。
         logic [QP_ID_W-1:0]         qpn;            // 完整 QPN tag，用于防止低位别名命中。
@@ -805,19 +948,23 @@ package smartnic_pkg;
     } cq_context_t;
 
     typedef struct packed {
-        logic                       valid;          // MR 表项有效。
-        logic                       pending_dereg;  // 已请求注销，等待 refcount 清零。
-        logic [VF_ID_W-1:0]         owner_func;     // 拥有该 MR 的 PF/VF function。
-        logic [MR_ID_W-1:0]         mr_id;          // 驱动可见的 MR handle。
-        logic [PD_ID_W-1:0]         pd_id;          // 与该 MR 关联的 Protection Domain。
-        logic [KEY_W-1:0]           lkey;           // 本地 DMA 操作使用的 local key。
-        logic [KEY_W-1:0]           rkey;           // 入站远端操作使用的 remote key。
-        logic [ADDR_W-1:0]          va_base;        // 该 MR 覆盖的首个虚拟地址。
-        logic [ADDR_W-1:0]          pa_base;        // 该 MR 段对应的首个物理/DMA 地址。
-        logic [DMA_LEN_W-1:0]       length;         // 该 MR 表项覆盖的字节数。
-        logic [PAGE_SHIFT_W-1:0]    page_shift;     // 页大小 log2(bytes)，例如 4 KiB 对应 12。
-        logic [5:0]                 access_flags;   // 由 mr_access_bit_e 索引的访问权限位图。
-        logic [15:0]                refcount;       // 正在进行的 DMA 引用数量。
+        logic                       valid;             // MR 表项有效。
+        logic [MR_ID_W-1:0]         mr_id;             // 驱动可见的 MR handle。
+        logic [KEY_W-1:0]           lkey;              // 本地 DMA 操作使用的 local key。
+        logic [KEY_W-1:0]           rkey;              // 入站远端操作使用的 remote key。
+        logic [ADDR_W-1:0]          virtual_base_addr; // 该 MR 覆盖的首个虚拟地址。
+        logic [ADDR_W-1:0]          physical_base_addr;// 该 MR 段对应的首个物理/DMA 地址。
+        logic [DMA_LEN_W-1:0]       length;            // 该 MR 表项覆盖的字节数。
+        logic [PAGE_SHIFT_W-1:0]    page_size;         // 页大小 log2(bytes)，例如 4 KiB 对应 12。
+        logic [5:0]                 access_flags;      // 由 mr_access_bit_e 索引的访问权限位图。
+        logic [PD_ID_W-1:0]         pd_id;             // 与该 MR 关联的 Protection Domain。
+        logic [VF_ID_W-1:0]         owner_function;    // 拥有该 MR 的 PF/VF function。
+        logic [MR_REFCOUNT_W-1:0]   refcount;          // 正在进行的 DMA 引用数量。
+        logic                       pending_deregister;// 已请求注销，等待 refcount 清零。
+        logic                       memory_window;     // 1 表示 Memory Window 表项，绑定规则留给 6.7。
+        logic [KEY_W-1:0]           parent_mr_key;     // Memory Window 绑定的父 MR key，6.7 使用。
+        logic                       error_state;       // 该 MR 是否处于错误状态。
+        logic [15:0]                error_code;        // MR 最近一次错误码。
     } mr_entry_t;
 
     typedef struct packed {

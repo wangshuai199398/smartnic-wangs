@@ -1,6 +1,6 @@
 # Cocotb 模块级单元测试
 
-本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager 和 CQ manager 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
+本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager、CQ manager 和 MR manager 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
 
 ## 测试文件
 
@@ -28,6 +28,13 @@
 | `test_cqe_write_path.py` | `rtl/cq/cqe_write_path.sv` | CQE 地址计算、64-byte DMA write 请求、PI update、lookup/permission error、DMA backpressure、基础 PI wrap |
 | `test_cq_index_manager.py` | `rtl/cq/cq_index_manager.sv` | PI/CI wraparound、CQ arm CI 更新、depth/index 越界、empty/full、overflow set/clear |
 | `test_cq_notification.py` | `rtl/cq/cq_notification.sv` | polling mode、armed、solicited-only、moderation count/timer、error immediate notify、MSI-X backpressure |
+| `test_cq_integration.py` | `sim/cocotb/cq_integration_tb.sv` | mock completion -> 64-byte CQE -> CQE write address -> PI update -> notification/MSI-X request |
+| `test_mr_table.py` | `rtl/mr/mr_table.sv` | MR entry 写入、lkey/rkey lookup、VA->PA 转换、bounds check、owner function、refcount 上下溢 |
+| `test_mr_registration.py` | `rtl/mr/mr_registration_manager.sv` | REGISTER_MR 请求校验、SG entry fetch mock、MR entry 构造、table alias/full、成功响应 |
+| `test_mr_deregistration.py` | `rtl/mr/mr_deregistration_manager.sv` | DEREGISTER_MR lookup、pending_deregister、refcount drain、clear entry、权限/PD/timeout 错误 |
+| `test_mr_key_checker.py` | `rtl/mr/mr_key_checker.sv` | 本地 lkey、远端 rkey、方向错误、pending、权限、zero length、bounds 错误 |
+| `test_mr_access_checker.py` | `rtl/mr/mr_access_checker.sv` | local/remote/MW access_flags 权限、pending、owner、zero length、bounds、overflow 错误 |
+| `test_mr_pd_checker.py` | `rtl/mr/mr_pd_checker.sv` | QP PD 与 MR PD 匹配、PD mismatch、owner、pending、invalid entry、invalid operation、PA 透传 |
 
 ## 运行方式
 
@@ -38,6 +45,7 @@ make pcie-test
 make doorbell-test
 make qp-test
 make cq-test
+make mr-test
 ```
 
 或直接进入本目录运行：
@@ -47,6 +55,7 @@ make -C sim/cocotb pcie-control-plane-tests
 make -C sim/cocotb doorbell-tests
 make -C sim/cocotb qp-tests
 make -C sim/cocotb cq-tests
+make -C sim/cocotb mr-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -74,6 +83,13 @@ make -C sim/cocotb test-completion-engine
 make -C sim/cocotb test-cqe-write-path
 make -C sim/cocotb test-cq-index-manager
 make -C sim/cocotb test-cq-notification
+make -C sim/cocotb test-cq-integration
+make -C sim/cocotb test-mr-table
+make -C sim/cocotb test-mr-registration
+make -C sim/cocotb test-mr-deregistration
+make -C sim/cocotb test-mr-key-checker
+make -C sim/cocotb test-mr-access-checker
+make -C sim/cocotb test-mr-pd-checker
 ```
 
 ## 当前限制
@@ -89,3 +105,10 @@ make -C sim/cocotb test-cq-notification
 - CQE write path 测试只验证地址计算、DMA write 请求和 producer update 请求，不实现真实 DMA Engine、不做完整 overflow 检测，也不触发 MSI-X。
 - CQ index manager 测试只验证 reserved-slot index 规则和 overflow 标志，不实现 owner bit phase 方案。
 - CQ notification 测试只验证 CQE commit 后的通知决策和 MSI-X request ready/valid，不发送真实 MSI-X PCIe memory write。
+- CQ integration 测试使用 Python mock/stub 串起 CQ 子模块接口语义，不实例化完整 CQ manager top，也不执行真实 DMA/PCIe/RoCEv2。
+- MR table 测试只验证 key 查找、地址范围转换和 refcount 计数，不实现 MR 注册命令、权限矩阵、PD 规则或 Memory Window bind。
+- MR registration 测试只 mock 第一个 pinned SG entry 和 MR table 写响应，不实现真实 DMA fetch、多段 SG page walk、IOMMU 或 PD allocator。
+- MR deregistration 测试只 mock MR table read/write 响应和 refcount drain，不取消真实 DMA，也不处理 Memory Window 级联失效或 PF force deregister 策略。
+- MR key checker 测试只验证 lkey/rkey 使用方向和 MR table check 状态映射，不实现 access_flags 权限矩阵、完整 PD 规则或 Memory Window bind。
+- MR access checker 测试只验证 `access_flags` 权限矩阵和基础 bounds/owner/pending 检查，不实现完整 PD mismatch、Memory Window bind/unbind 或 QP error invalidation。
+- MR PD checker 测试只验证 QP PD 与 MR PD 的最后一道匹配检查，不实现按 QPN 查询 QP context、remote requester identity 或 PF admin override。

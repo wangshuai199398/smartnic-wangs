@@ -314,3 +314,55 @@ async def overflow_set_and_clear_update_context(dut):
     assert await clear_overflow(dut, cqn=12, function_id=1) == CQ_TABLE_STATUS_OK
     clear_result = await read_context(dut, cqn=12, function_id=1)
     assert extract_field(clear_result["data"], "overflow") == 0
+
+
+@cocotb.test()
+async def cq_arm_and_completion_update_same_cycle_keep_indices_consistent(dut):
+    await reset_dut(dut)
+
+    initial = pack_cq_context(cqn=13, owner_function=1, producer_index=5, consumer_index=1)
+    assert await write_context(dut, cqn=13, owner=1, ctx=initial) == CQ_TABLE_STATUS_OK
+
+    dut.cq_arm_valid.value = 1
+    dut.cq_arm_cqn.value = 13
+    dut.cq_arm_function_id.value = 1
+    dut.cq_arm_consumer_index.value = 4
+    dut.cq_arm_armed.value = 1
+    dut.cq_arm_solicited_only.value = 1
+    dut.cq_arm_error.value = 0
+
+    dut.completion_update_valid.value = 1
+    dut.completion_update_cqn.value = 13
+    dut.completion_update_owner_function.value = 1
+    dut.completion_update_new_pi.value = 6
+
+    await RisingEdge(dut.clk)
+    dut.cq_arm_valid.value = 0
+    dut.completion_update_valid.value = 0
+
+    assert int(dut.cq_arm_status.value) == CQ_TABLE_STATUS_OK
+    assert int(dut.completion_update_status.value) == CQ_TABLE_STATUS_OK
+    await clear_response(dut, "cq_arm_rsp_ready")
+    await clear_response(dut, "completion_update_rsp_ready")
+
+    result = await read_context(dut, cqn=13, function_id=1)
+    assert result["status"] == CQ_TABLE_STATUS_OK
+    assert extract_field(result["data"], "producer_index") == 6
+    assert extract_field(result["data"], "consumer_index") == 4
+    assert extract_field(result["data"], "armed") == 1
+    assert extract_field(result["data"], "solicited_only") == 1
+
+
+@cocotb.test()
+async def cq_arm_after_existing_cqe_preserves_producer_index(dut):
+    await reset_dut(dut)
+
+    initial = pack_cq_context(cqn=14, owner_function=1, producer_index=3, consumer_index=1)
+    assert await write_context(dut, cqn=14, owner=1, ctx=initial) == CQ_TABLE_STATUS_OK
+    assert await arm_cq(dut, cqn=14, function_id=1, consumer_index=2, solicited_only=0) == CQ_TABLE_STATUS_OK
+
+    result = await read_context(dut, cqn=14, function_id=1)
+    assert result["status"] == CQ_TABLE_STATUS_OK
+    assert extract_field(result["data"], "producer_index") == 3
+    assert extract_field(result["data"], "consumer_index") == 2
+    assert extract_field(result["data"], "armed") == 1

@@ -1,0 +1,245 @@
+# SPDX-License-Identifier: MIT
+"""MR Protection Domain checker 最小行为测试。"""
+
+import cocotb
+from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge
+
+
+MR_OP_LOCAL_READ = 0
+MR_OP_LOCAL_WRITE = 1
+MR_OP_LOCAL_RECV_WRITE = 2
+MR_OP_REMOTE_READ = 3
+MR_OP_REMOTE_WRITE = 4
+MR_OP_REMOTE_ATOMIC = 5
+MR_OP_MW_BIND = 6
+
+MR_PD_CHECK_ERR_NONE = 0
+MR_PD_CHECK_ERR_INVALID_ENTRY = 1
+MR_PD_CHECK_ERR_PENDING = 2
+MR_PD_CHECK_ERR_PERMISSION = 3
+MR_PD_CHECK_ERR_MISSING_QP_PD = 4
+MR_PD_CHECK_ERR_PD_MISMATCH = 5
+MR_PD_CHECK_ERR_INVALID_OPERATION = 6
+MR_PD_CHECK_ERR_MW_PARENT_PD = 7
+
+
+MR_ENTRY_FIELDS = [
+    ("valid", 1),
+    ("mr_id", 24),
+    ("lkey", 32),
+    ("rkey", 32),
+    ("virtual_base_addr", 64),
+    ("physical_base_addr", 64),
+    ("length", 32),
+    ("page_size", 6),
+    ("access_flags", 6),
+    ("pd_id", 24),
+    ("owner_function", 16),
+    ("refcount", 16),
+    ("pending_deregister", 1),
+    ("memory_window", 1),
+    ("parent_mr_key", 32),
+    ("error_state", 1),
+    ("error_code", 16),
+]
+
+
+def pack_fields(fields, values):
+    packed = 0
+    for name, width in fields:
+        packed = (packed << width) | (values.get(name, 0) & ((1 << width) - 1))
+    return packed
+
+
+def extract_field(packed, field_name):
+    offset = 0
+    for name, width in reversed(MR_ENTRY_FIELDS):
+        if name == field_name:
+            return (int(packed) >> offset) & ((1 << width) - 1)
+        offset += width
+    raise KeyError(field_name)
+
+
+def pack_mr_entry(**overrides):
+    values = {
+        "valid": 1,
+        "mr_id": 7,
+        "lkey": 0x1001,
+        "rkey": 0x2001,
+        "virtual_base_addr": 0x1000_0000,
+        "physical_base_addr": 0x8000_0000,
+        "length": 0x1000,
+        "page_size": 12,
+        "access_flags": 0x3F,
+        "pd_id": 3,
+        "owner_function": 1,
+        "refcount": 0,
+        "pending_deregister": 0,
+        "memory_window": 0,
+        "parent_mr_key": 0,
+        "error_state": 0,
+        "error_code": 0,
+    }
+    values.update(overrides)
+    return pack_fields(MR_ENTRY_FIELDS, values)
+
+
+async def reset_dut(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    dut.rst_n.value = 0
+
+    dut.pd_check_valid.value = 0
+    dut.pd_check_operation.value = 0
+    dut.pd_check_is_remote.value = 0
+    dut.pd_check_mr_entry.value = 0
+    dut.pd_check_qp_pd_id.value = 0
+    dut.pd_check_qp_pd_valid.value = 0
+    dut.pd_check_mr_pd_id.value = 0
+    dut.pd_check_qpn.value = 0
+    dut.pd_check_owner_function.value = 0
+    dut.pd_check_va.value = 0
+    dut.pd_check_len.value = 0
+    dut.pd_check_physical_addr.value = 0
+    dut.pd_parent_pd_id.value = 0
+    dut.pd_parent_pd_valid.value = 0
+    dut.pd_check_resp_ready.value = 0
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+
+async def check_pd(
+    dut,
+    *,
+    operation=MR_OP_LOCAL_READ,
+    remote=0,
+    entry=None,
+    qp_pd=3,
+    qp_pd_valid=1,
+    mr_pd=3,
+    owner=1,
+    pa=0x8000_0040,
+    parent_pd=3,
+    parent_valid=0,
+):
+    dut.pd_check_valid.value = 1
+    dut.pd_check_operation.value = operation
+    dut.pd_check_is_remote.value = remote
+    dut.pd_check_mr_entry.value = entry if entry is not None else pack_mr_entry(pd_id=mr_pd)
+    dut.pd_check_qp_pd_id.value = qp_pd
+    dut.pd_check_qp_pd_valid.value = qp_pd_valid
+    dut.pd_check_mr_pd_id.value = mr_pd
+    dut.pd_check_qpn.value = 0x55
+    dut.pd_check_owner_function.value = owner
+    dut.pd_check_va.value = 0x1000_0040
+    dut.pd_check_len.value = 64
+    dut.pd_check_physical_addr.value = pa
+    dut.pd_parent_pd_id.value = parent_pd
+    dut.pd_parent_pd_valid.value = parent_valid
+    await RisingEdge(dut.clk)
+    dut.pd_check_valid.value = 0
+
+    for _ in range(4):
+        await RisingEdge(dut.clk)
+        if int(dut.pd_check_resp_valid.value) == 1:
+            result = {
+                "allowed": int(dut.pd_check_allowed.value),
+                "pa": int(dut.pd_check_physical_addr_out.value),
+                "entry": int(dut.pd_check_mr_entry_out.value),
+                "error": int(dut.pd_check_error_code.value),
+            }
+            dut.pd_check_resp_ready.value = 1
+            await RisingEdge(dut.clk)
+            dut.pd_check_resp_ready.value = 0
+            return result
+    raise AssertionError("mr_pd_checker did not produce response")
+
+
+@cocotb.test()
+async def local_operation_matching_pd_succeeds(dut):
+    await reset_dut(dut)
+
+    resp = await check_pd(dut, operation=MR_OP_LOCAL_READ, remote=0, qp_pd=3, mr_pd=3)
+
+    assert resp["allowed"] == 1
+    assert resp["error"] == MR_PD_CHECK_ERR_NONE
+    assert resp["pa"] == 0x8000_0040
+    assert extract_field(resp["entry"], "pd_id") == 3
+
+
+@cocotb.test()
+async def local_operation_pd_mismatch_is_rejected(dut):
+    await reset_dut(dut)
+
+    resp = await check_pd(dut, operation=MR_OP_LOCAL_WRITE, remote=0, qp_pd=4, mr_pd=3)
+
+    assert resp["allowed"] == 0
+    assert resp["error"] == MR_PD_CHECK_ERR_PD_MISMATCH
+
+
+@cocotb.test()
+async def remote_operation_matching_pd_succeeds(dut):
+    await reset_dut(dut)
+
+    resp = await check_pd(dut, operation=MR_OP_REMOTE_WRITE, remote=1, qp_pd=3, mr_pd=3)
+
+    assert resp["allowed"] == 1
+    assert resp["error"] == MR_PD_CHECK_ERR_NONE
+    assert resp["pa"] == 0x8000_0040
+
+
+@cocotb.test()
+async def remote_operation_pd_mismatch_is_rejected(dut):
+    await reset_dut(dut)
+
+    resp = await check_pd(dut, operation=MR_OP_REMOTE_READ, remote=1, qp_pd=5, mr_pd=3)
+
+    assert resp["allowed"] == 0
+    assert resp["error"] == MR_PD_CHECK_ERR_PD_MISMATCH
+
+
+@cocotb.test()
+async def owner_pending_invalid_entry_and_missing_qp_pd_are_rejected(dut):
+    await reset_dut(dut)
+
+    owner = await check_pd(dut, owner=2)
+    pending = await check_pd(dut, entry=pack_mr_entry(pending_deregister=1, pd_id=3))
+    invalid = await check_pd(dut, entry=pack_mr_entry(valid=0, pd_id=3))
+    missing = await check_pd(dut, qp_pd_valid=0)
+
+    assert owner["error"] == MR_PD_CHECK_ERR_PERMISSION
+    assert pending["error"] == MR_PD_CHECK_ERR_PENDING
+    assert invalid["error"] == MR_PD_CHECK_ERR_INVALID_ENTRY
+    assert missing["error"] == MR_PD_CHECK_ERR_MISSING_QP_PD
+
+
+@cocotb.test()
+async def invalid_operation_and_remote_direction_mismatch_are_rejected(dut):
+    await reset_dut(dut)
+
+    invalid = await check_pd(dut, operation=15)
+    remote_mismatch = await check_pd(dut, operation=MR_OP_REMOTE_ATOMIC, remote=0)
+
+    assert invalid["error"] == MR_PD_CHECK_ERR_INVALID_OPERATION
+    assert remote_mismatch["error"] == MR_PD_CHECK_ERR_INVALID_OPERATION
+
+
+@cocotb.test()
+async def memory_window_parent_pd_mismatch_is_reserved_error(dut):
+    await reset_dut(dut)
+
+    resp = await check_pd(
+        dut,
+        operation=MR_OP_MW_BIND,
+        entry=pack_mr_entry(memory_window=1, pd_id=3),
+        qp_pd=3,
+        mr_pd=3,
+        parent_pd=4,
+        parent_valid=1,
+    )
+
+    assert resp["allowed"] == 0
+    assert resp["error"] == MR_PD_CHECK_ERR_MW_PARENT_PD

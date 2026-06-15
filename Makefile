@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test driver userspace regression coverage clean
+.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test driver userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -13,11 +13,12 @@ verilator:
 	@echo "[verilator] Verilator 仿真构建占位：后续会编译 smartnic_top 和模块级测试平台。"
 
 cocotb:
-	@echo "[cocotb] 运行 Cocotb PCIe 控制面、Doorbell、QP 和 CQ 单元测试入口。"
+	@echo "[cocotb] 运行 Cocotb PCIe 控制面、Doorbell、QP、CQ 和 MR 单元测试入口。"
 	@$(MAKE) -C sim/cocotb pcie-control-plane-tests
 	@$(MAKE) -C sim/cocotb doorbell-tests
 	@$(MAKE) -C sim/cocotb qp-tests
 	@$(MAKE) -C sim/cocotb cq-tests
+	@$(MAKE) -C sim/cocotb mr-tests
 
 pcie-test:
 	@echo "[pcie-test] 运行 PCIe endpoint/control-plane 模块级测试入口。"
@@ -34,6 +35,10 @@ qp-test:
 cq-test:
 	@echo "[cq-test] 运行 CQ manager 模块级测试入口。"
 	@$(MAKE) -C sim/cocotb cq-tests
+
+mr-test:
+	@echo "[mr-test] 运行 MR manager 模块级测试入口。"
+	@$(MAKE) -C sim/cocotb mr-tests
 
 driver:
 	@echo "[driver] 进入 Linux driver 子目录。"

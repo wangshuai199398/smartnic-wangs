@@ -43,16 +43,16 @@
 - [x] 5.3 Implement CQE write path that calculates host CQ buffer address and emits DMA/PCIe memory writes.
 - [x] 5.4 Implement CQ producer/consumer wraparound logic and overflow detection.
 - [x] 5.5 Implement CQ notification logic for polling mode, solicited events, interrupt moderation count, and moderation timer.
-- [ ] 5.6 Add CQ tests for CQE formatting, producer/consumer updates, overflow, CQ arm races, moderation count, and MSI-X request generation.
+- [x] 5.6 Add CQ tests for CQE formatting, producer/consumer updates, overflow, CQ arm races, moderation count, and MSI-X request generation.
 
 ## 6. MR Manager and Memory Protection
 
-- [ ] 6.1 Implement MR table with valid bit, lkey, rkey, virtual base, physical base, length, page size, access flags, PD, owner function, and refcount.
-- [ ] 6.2 Implement MR registration command handling from pinned scatter-gather page lists.
-- [ ] 6.3 Implement MR deregistration with pending-deregister state and in-flight DMA refcount drain.
-- [ ] 6.4 Implement local lkey and remote rkey direction checks.
-- [ ] 6.5 Implement access permission checks for local read/write, remote read/write, remote atomic, and memory window bind.
-- [ ] 6.6 Implement protection domain checks for local and remote operations.
+- [x] 6.1 Implement MR table with valid bit, lkey, rkey, virtual base, physical base, length, page size, access flags, PD, owner function, and refcount.
+- [x] 6.2 Implement MR registration command handling from pinned scatter-gather page lists.
+- [x] 6.3 Implement MR deregistration with pending-deregister state and in-flight DMA refcount drain.
+- [x] 6.4 Implement local lkey and remote rkey direction checks.
+- [x] 6.5 Implement access permission checks for local read/write, remote read/write, remote atomic, and memory window bind.
+- [x] 6.6 Implement protection domain checks for local and remote operations.
 - [ ] 6.7 Implement memory window bind, unbind, permission subset validation, and invalidation on QP error where required.
 - [ ] 6.8 Add MR tests for registration, deregistration, translation, bounds rejection, PD mismatch, key direction, permission rejection, and memory window binding.
 

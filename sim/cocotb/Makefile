@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -63,6 +63,21 @@ cq-tests:
 		$(MAKE) test-cqe-write-path; \
 		$(MAKE) test-cq-index-manager; \
 		$(MAKE) test-cq-notification; \
+		$(MAKE) test-cq-integration; \
+	fi
+
+mr-tests:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 cocotb，跳过 MR 单元测试。"; \
+	elif ! command -v verilator >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 Verilator，跳过 MR 单元测试。"; \
+	else \
+		$(MAKE) test-mr-table; \
+		$(MAKE) test-mr-registration; \
+		$(MAKE) test-mr-deregistration; \
+		$(MAKE) test-mr-key-checker; \
+		$(MAKE) test-mr-access-checker; \
+		$(MAKE) test-mr-pd-checker; \
 	fi
 
 test-pcie-cfg:
@@ -173,6 +188,41 @@ test-cq-index-manager:
 test-cq-notification:
 	$(MAKE) TOPLEVEL=cq_notification MODULE=test_cq_notification \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/cq/cq_notification.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cq-integration:
+	$(MAKE) TOPLEVEL=cq_integration_tb MODULE=test_cq_integration \
+		VERILOG_SOURCES="cq_integration_tb.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-table:
+	$(MAKE) TOPLEVEL=mr_table MODULE=test_mr_table \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_table.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-registration:
+	$(MAKE) TOPLEVEL=mr_registration_manager MODULE=test_mr_registration \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_registration_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-deregistration:
+	$(MAKE) TOPLEVEL=mr_deregistration_manager MODULE=test_mr_deregistration \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_deregistration_manager.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-key-checker:
+	$(MAKE) TOPLEVEL=mr_key_checker MODULE=test_mr_key_checker \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_key_checker.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-access-checker:
+	$(MAKE) TOPLEVEL=mr_access_checker MODULE=test_mr_access_checker \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_access_checker.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-mr-pd-checker:
+	$(MAKE) TOPLEVEL=mr_pd_checker MODULE=test_mr_pd_checker \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_pd_checker.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:
