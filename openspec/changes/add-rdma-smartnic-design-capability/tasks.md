@@ -61,7 +61,7 @@
 - [x] 7.1 Implement DMA descriptor format and dispatcher for Send, Recv, RDMA Write, RDMA Read, and CQE writes.
 - [x] 7.2 Implement WQE and SGE fetch support for inline and extended SGE lists up to 256 entries.
 - [x] 7.3 Implement SGE traversal with total-length accounting and zero-overlap validation.
-- [ ] 7.4 Implement MR lookup and permission integration for every DMA segment.
+- [x] 7.4 Implement MR lookup and permission integration for every DMA segment.
 - [ ] 7.5 Implement host memory read path for Send and RDMA Write payload generation.
 - [ ] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
 - [ ] 7.7 Implement PMTU and 4KB physical page boundary segmentation.

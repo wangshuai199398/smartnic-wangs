@@ -203,3 +203,84 @@ A_end <= B_base 或 B_end <= A_base
 ### Inline Data 边界
 
 inline data 是 payload 直接放在 WQE 中，不引用 host SGE，也不需要 lkey/rkey、MR lookup 或 overlap 检查。因此 inline data 不走普通 SGE traversal 路径。当前模块提供简单的 inline 长度校验语义：`inline_data_len` 必须等于 `expected_total_len`，payload 数据搬运留给后续 transport/DMA 数据路径。
+
+## MR Lookup 和 Permission Integration
+
+7.4 阶段新增 `rtl/dma/dma_mr_integration.sv`。它接收 7.3 输出的 VA segment，并把每个 segment 送入 MR 保护检查管线：
+
+```text
+dma_segment
+  -> mr_key_checker
+  -> mr_access_checker
+  -> mr_pd_checker
+  -> VA to PA
+  -> MR/MW refcount +1
+  -> protected_segment
+```
+
+这样设计的核心目的，是让后续 host read/write DMA path 只看到已经验证过的物理地址和权限，不再重复处理 lkey/rkey、PD、bounds、Memory Window 状态等安全细节。
+
+### Key Direction Check
+
+`dma_mr_integration` 根据 `dma_segment_is_remote` 选择 key：
+
+- `dma_segment_is_remote=0`：使用 `dma_segment_lkey`，进入本地 DMA path；
+- `dma_segment_is_remote=1`：使用 `dma_segment_rkey`，进入远端 RDMA path；
+- 不允许 lkey/rkey fallback。
+
+典型 operation 映射如下：
+
+| 场景 | MR operation | key |
+| --- | --- | --- |
+| Send payload host read | `MR_OP_LOCAL_DMA_READ` | lkey |
+| RDMA Write payload host read | `MR_OP_LOCAL_DMA_READ` | lkey |
+| Recv buffer host write | `MR_OP_LOCAL_RECV_WRITE` | lkey |
+| RDMA Read response host write | `MR_OP_LOCAL_DMA_WRITE` | lkey |
+| inbound RDMA Write | `MR_OP_REMOTE_RDMA_WRITE` | rkey |
+| inbound RDMA Read | `MR_OP_REMOTE_RDMA_READ` | rkey |
+| inbound Atomic | `MR_OP_REMOTE_ATOMIC` | rkey |
+| Memory Window bind | `MR_OP_MW_BIND` | lkey/control key |
+
+方向错误会直接进入 DMA/MR error path，并携带 `desc_id`、`qpn`、`segment_index` 和错误码。
+
+### Access 和 PD Check
+
+key lookup 成功后，segment 会继续通过：
+
+- `mr_access_checker`：检查 `access_flags` 是否允许该 operation；
+- `mr_pd_checker`：检查 QP PD 与 MR/MW PD 是否一致；
+- bounds/VA->PA：复用 MR table / access checker 的范围检查结果。
+
+如果 lookup 到 Memory Window entry，后续检查只使用 MW entry 自己的 range、`access_flags`、`pd_id` 和 `physical_base_addr`。它不会回退到 parent MR 权限，因为 MW 的意义就是缩小父 MR 的可访问窗口和权限。
+
+### Protected Segment
+
+通过全部检查后，模块输出 protected segment：
+
+- 原始 `va`
+- 转换后的 `pa`
+- `len`
+- 实际使用的 key
+- `access_flags`
+- `byte_offset`
+- `is_last`
+- `mr_refcount_token`
+
+`mr_refcount_token` 保存 key、key 方向、owner function 和 MR/MW handle。后续真实 DMA 完成时，7.5/7.6 的完成路径可以用这个 token 对同一个 MR/MW 做 `ref_dec`。
+
+### Refcount
+
+每个 segment 通过 key/access/PD/bounds 检查后，都会发起 MR/MW `refcount +1`。这保证 MR deregistration 或 MW unbind 不会在 DMA 使用期间直接释放表项。
+
+当前阶段只实现 refcount increment 和 token 输出；真实 DMA 完成后的 refcount decrement 留给后续 host read/write 完成路径。若 refcount 已满，模块返回 `REFCOUNT_OVERFLOW`，并阻止该 segment 进入 protected output。
+
+### 当前边界
+
+7.4 不实现：
+
+- host memory read/write；
+- PMTU / 4KB page boundary split；
+- DMA arbitration；
+- completion error propagation。
+
+这些分别由 7.5、7.6、7.7、7.8 和 7.9 继续接上。

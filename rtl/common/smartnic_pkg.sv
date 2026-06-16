@@ -428,6 +428,36 @@ package smartnic_pkg;
         DMA_DISP_ERR_DIRECTION     = 16'h0004  // opcode 与 direction 不匹配。
     } dma_dispatch_error_e;
 
+    typedef enum logic [3:0] {
+        DMA_MR_STATE_IDLE          = 4'd0, // 等待 dma_segment。
+        DMA_MR_STATE_ACCEPT        = 4'd1, // 锁存当前 segment 和 key 方向。
+        DMA_MR_STATE_KEY_CHECK     = 4'd2, // 调用 mr_key_checker。
+        DMA_MR_STATE_ACCESS_CHECK  = 4'd3, // 调用 mr_access_checker。
+        DMA_MR_STATE_PD_CHECK      = 4'd4, // 调用 mr_pd_checker。
+        DMA_MR_STATE_TRANSLATE     = 4'd5, // 锁存 VA->PA 结果和访问权限。
+        DMA_MR_STATE_REFCOUNT_INC  = 4'd6, // 对命中的 MR/MW 做 refcount +1。
+        DMA_MR_STATE_EMIT          = 4'd7, // 输出 protected segment。
+        DMA_MR_STATE_ERROR         = 4'd8  // 输出错误响应。
+    } dma_mr_integration_state_e;
+
+    typedef enum logic [15:0] {
+        DMA_MR_ERR_NONE              = 16'h0000, // 无错误。
+        DMA_MR_ERR_INVALID_KEY       = 16'h0001, // key 为 0。
+        DMA_MR_ERR_KEY_DIRECTION     = 16'h0002, // lkey/rkey 使用方向错误。
+        DMA_MR_ERR_LOOKUP_MISS       = 16'h0003, // MR lookup 未命中。
+        DMA_MR_ERR_PENDING           = 16'h0004, // MR/MW 正在注销或 invalidating。
+        DMA_MR_ERR_ACCESS_DENIED     = 16'h0005, // access_flags 不允许该操作。
+        DMA_MR_ERR_PD_MISMATCH       = 16'h0006, // QP PD 与 MR/MW PD 不匹配。
+        DMA_MR_ERR_BOUNDS            = 16'h0007, // VA/length 超出 MR/MW 范围。
+        DMA_MR_ERR_ADDR_OVERFLOW     = 16'h0008, // 地址加法溢出。
+        DMA_MR_ERR_ZERO_LENGTH       = 16'h0009, // segment length 为 0。
+        DMA_MR_ERR_PERMISSION        = 16'h000a, // owner_function 不匹配。
+        DMA_MR_ERR_MW_INVALIDATING   = 16'h000b, // Memory Window 正在 invalidating。
+        DMA_MR_ERR_REFCOUNT_OVERFLOW = 16'h000c, // refcount +1 溢出。
+        DMA_MR_ERR_UNSUPPORTED_OP    = 16'h000d, // operation 映射不支持。
+        DMA_MR_ERR_CHECKER           = 16'h000e  // checker 或 MR table 返回其他错误。
+    } dma_mr_error_e;
+
     typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
 
     typedef enum logic [1:0] {
@@ -1114,10 +1144,37 @@ package smartnic_pkg;
         logic [ADDR_W-1:0]          va;               // SGE 虚拟地址，7.4 再做 MR 翻译。
         logic [DMA_LEN_W-1:0]       len;              // 当前 segment 长度。
         logic [KEY_W-1:0]           lkey;             // 当前 SGE 使用的本地 key。
+        logic [KEY_W-1:0]           rkey;             // 远端访问使用的 remote key，7.4 使用。
+        logic                       is_remote;        // 1 表示使用 rkey/remote permission path。
         logic [15:0]                flags;            // SGE flags，后续保留给 DMA/MR 语义。
         logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;    // 当前 segment 在整个 WR payload 中的字节偏移。
         logic                       is_last;          // 该 segment 是否是 WR 的最后一个 SGE。
     } dma_segment_t;
+
+    typedef struct packed {
+        logic [KEY_W-1:0]           key;              // refcount 后续 ref_dec 使用的 lkey/rkey。
+        logic                       is_remote;        // 1 表示 key 是 rkey，0 表示 key 是 lkey。
+        logic [VF_ID_W-1:0]         owner_function;   // ref_dec 时校验 owner_function。
+        logic [MR_ID_W-1:0]         mr_id;            // 命中的 MR/MW handle，便于调试和后续 scoreboard。
+    } mr_ref_token_t;
+
+    typedef struct packed {
+        logic [15:0]                desc_id;          // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]         qpn;              // segment 所属 QPN。
+        logic [VF_ID_W-1:0]         owner_function;   // segment 所属 PF/VF function。
+        logic [PD_ID_W-1:0]         pd_id;            // 已通过校验的 PD。
+        mr_operation_e              operation;        // 已通过校验的 MR operation。
+        logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 原始 SGE/segment index。
+        logic [ADDR_W-1:0]          va;               // 原始虚拟地址。
+        logic [ADDR_W-1:0]          pa;               // 经 MR/MW 转换后的物理/DMA 地址。
+        logic [DMA_LEN_W-1:0]       len;              // 当前 protected segment 长度。
+        logic [KEY_W-1:0]           key;              // 本次实际使用的 lkey 或 rkey。
+        logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;    // WR payload 内字节偏移。
+        logic                       is_last;          // 是否是 WR 最后一段。
+        logic [5:0]                 access_flags;     // MR/MW entry 的 access_flags。
+        mr_ref_token_t              refcount_token;   // 后续 DMA 完成后 ref_dec 使用的 token。
+        dma_mr_error_e              error_code;       // protected path 错误码；成功为 NONE。
+    } protected_dma_segment_t;
 
     typedef struct packed {
         logic [VF_ID_W-1:0]         owner_func;      // completion 所属 PF/VF function。
