@@ -52,6 +52,7 @@ module dma_mr_integration (
     output logic [KEY_W-1:0]             protected_segment_key,       // 实际使用的 lkey/rkey。
     output logic [DMA_BYTE_OFFSET_W-1:0] protected_segment_byte_offset,// WR payload 内偏移。
     output logic                         protected_segment_is_last,   // 是否最后一段。
+    output logic [15:0]                  protected_segment_flags,     // segment flags 透传。
     output logic [5:0]                   protected_segment_access_flags,// MR/MW access_flags。
     output mr_ref_token_t                protected_segment_mr_refcount_token, // 后续 ref_dec token。
     output dma_mr_error_e                protected_segment_error_code,// 成功为 NONE。
@@ -194,6 +195,7 @@ module dma_mr_integration (
     assign protected_segment_key = selected_key_reg;
     assign protected_segment_byte_offset = byte_offset_reg;
     assign protected_segment_is_last = is_last_reg;
+    assign protected_segment_flags = flags_reg;
     assign protected_segment_access_flags = access_flags_reg;
     assign protected_segment_mr_refcount_token = ref_token_reg;
     assign protected_segment_error_code = error_code_reg;

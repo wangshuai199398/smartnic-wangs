@@ -284,3 +284,77 @@ key lookup 成功后，segment 会继续通过：
 - completion error propagation。
 
 这些分别由 7.5、7.6、7.7、7.8 和 7.9 继续接上。
+
+## Host Memory Read Path
+
+7.5 阶段新增 `rtl/dma/dma_host_read_path.sv`。它接收 7.4 输出的 `protected_segment`，为 Send 和 RDMA Write 的本地 payload 生成 host memory read 请求：
+
+```text
+protected_segment_pa -> PCIe/DMA read request -> read response -> transport payload stream
+```
+
+Send 和 RDMA Write 都需要读取本地 host buffer：
+
+- Send：把本地 payload 读出后交给 transport，发送到对端 RQ；
+- RDMA Write：把本地 payload 读出后交给 RoCEv2 packetizer，写入对端 remote VA/rkey 指定的内存。
+
+Recv、RDMA Read response delivery 和 CQE write 不走这个模块，它们属于 host write path 或 CQE write path。
+
+### Read Request
+
+`dma_host_read_path` 只接受 `MR_OP_LOCAL_DMA_READ`，即已经过 MR 检查的本地读 segment。输入字段包括：
+
+- `protected_segment_pa`
+- `protected_segment_len`
+- `protected_segment_byte_offset`
+- `protected_segment_index`
+- `protected_segment_is_last`
+- `protected_segment_mr_refcount_token`
+
+模块生成：
+
+- `pcie_read_req_addr = protected_segment_pa + bytes_completed`
+- `pcie_read_req_len = min(remaining_len, DMA_MAX_READ_BYTES)`
+- `pcie_read_req_tag = {desc_id, segment_index, chunk_index}`
+
+当前 `DMA_MAX_READ_BYTES` 等于内部 payload 数据总线的一拍字节数。若 segment 长度更大，7.5 会拆成多个固定大小 read chunk。这个拆分只解决“单次 read 不能太大”的问题，不处理 PMTU 和 4KB page boundary；后两者留给 7.7。
+
+### Payload Stream
+
+每个 read response 直接变成一拍 transport payload stream：
+
+- `payload_data = pcie_read_resp_data`
+- `payload_len = pcie_read_resp_len`
+- `payload_byte_offset = protected_segment_byte_offset + bytes_completed`
+- `payload_segment_index = protected_segment_index`
+- `payload_segment_last = 当前 chunk 是否为该 segment 最后一拍`
+- `payload_wqe_last = payload_segment_last && protected_segment_is_last`
+
+如果 `payload_ready=0`，模块保持当前 payload，不丢 response。
+
+### Refcount Release
+
+7.4 对 MR/MW 做了 refcount +1。7.5 在以下情况下输出 `mr_ref_dec_valid`：
+
+- segment 所有 read chunk 都成功转成 payload；
+- read response 报错；
+- response tag mismatch；
+- response length mismatch；
+- validation 阶段发现 unsupported operation 或 zero length。
+
+这样做的原因是：只要 host read path 接收了 protected segment，就必须负责释放它携带的 MR/MW refcount token。真实 ref_dec 对接 `mr_table` 的响应和错误处理，后续可继续接入 7.9 的 completion error propagation。
+
+### Error Path
+
+当前错误路径输出 `host_read_error_*`，覆盖：
+
+- unsupported operation；
+- zero segment length；
+- PA 为 0 或地址加法 overflow；
+- read request backpressure timeout；
+- PCIe read response error；
+- response tag mismatch；
+- response length mismatch；
+- payload output 长时间 backpressure。
+
+这些错误当前只停在 DMA host read path 输出边界，后续 7.9 会把它们映射为 work completion error status。

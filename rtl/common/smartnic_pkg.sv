@@ -144,6 +144,10 @@ package smartnic_pkg;
     parameter int INLINE_DATA_BYTES = 32; // WQE inline payload 预留窗口大小。
     parameter int INLINE_DATA_W   = INLINE_DATA_BYTES * 8; // inline payload packed 宽度。
     parameter int DMA_HOST_READ_TAG_W = 16; // fetcher 发起 host read 使用的 tag 位宽。
+    parameter int DMA_READ_TAG_W = 32; // payload host read path 使用的 tag 位宽。
+    parameter int DMA_PAYLOAD_DATA_W = PCIE_TLP_DATA_W; // transport payload stream 数据位宽。
+    parameter int DMA_PAYLOAD_KEEP_W = DMA_PAYLOAD_DATA_W / 8; // payload stream byte-enable/keep 位宽。
+    parameter int DMA_MAX_READ_BYTES = DMA_PAYLOAD_DATA_W / 8; // 7.5 阶段单个 host read chunk 最大字节数。
     parameter int DMA_BYTE_OFFSET_W = DMA_LEN_W; // SGE traversal 输出的 WR 内字节偏移位宽。
     parameter int DMA_TOTAL_LEN_W = DMA_LEN_W + 1; // 总长度累计多 1 bit，用于检测 32-bit length 溢出。
     parameter int SGE_TRAVERSAL_TIMEOUT_CYCLES = 1024; // 等待 SGE last 标志的超时周期。
@@ -457,6 +461,38 @@ package smartnic_pkg;
         DMA_MR_ERR_UNSUPPORTED_OP    = 16'h000d, // operation 映射不支持。
         DMA_MR_ERR_CHECKER           = 16'h000e  // checker 或 MR table 返回其他错误。
     } dma_mr_error_e;
+
+    typedef enum logic [3:0] {
+        DMA_HR_STATE_IDLE            = 4'd0, // 等待 protected segment。
+        DMA_HR_STATE_ACCEPT_SEGMENT  = 4'd1, // 锁存 segment。
+        DMA_HR_STATE_VALIDATE        = 4'd2, // 校验 operation、length、PA。
+        DMA_HR_STATE_ISSUE_READ_REQ  = 4'd3, // 发出一个 PCIe/DMA read chunk。
+        DMA_HR_STATE_WAIT_READ_RESP  = 4'd4, // 等待读响应。
+        DMA_HR_STATE_EMIT_PAYLOAD    = 4'd5, // 输出 payload stream。
+        DMA_HR_STATE_RELEASE_REF     = 4'd6, // 释放 MR/MW refcount token。
+        DMA_HR_STATE_DONE            = 4'd7, // 当前 segment 完成。
+        DMA_HR_STATE_ERROR           = 4'd8  // 输出错误/释放 refcount 后返回。
+    } dma_host_read_state_e;
+
+    typedef enum logic [15:0] {
+        DMA_HR_ERR_NONE              = 16'h0000, // 无错误。
+        DMA_HR_ERR_UNSUPPORTED_OP    = 16'h0001, // 非 host-read operation。
+        DMA_HR_ERR_ZERO_LENGTH       = 16'h0002, // protected segment length 为 0。
+        DMA_HR_ERR_ADDR_INVALID      = 16'h0003, // PA 为 0 或地址字段非法。
+        DMA_HR_ERR_ADDR_OVERFLOW     = 16'h0004, // PA + length 溢出。
+        DMA_HR_ERR_REQ_TIMEOUT       = 16'h0005, // read request 长时间无法发出。
+        DMA_HR_ERR_RESP_ERROR        = 16'h0006, // PCIe/DMA read response 报错。
+        DMA_HR_ERR_TAG_MISMATCH      = 16'h0007, // response tag 与当前请求不匹配。
+        DMA_HR_ERR_LEN_MISMATCH      = 16'h0008, // response len 与当前 chunk 不匹配。
+        DMA_HR_ERR_PAYLOAD_STALL     = 16'h0009, // payload ready 长时间不响应。
+        DMA_HR_ERR_REF_RELEASE       = 16'h000a  // refcount release 返回错误，当前阶段预留。
+    } dma_host_read_error_e;
+
+    typedef struct packed {
+        logic [15:0]                desc_id;          // 关联 descriptor ID。
+        logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 关联 segment index。
+        logic [6:0]                 chunk_index;      // segment 内 read chunk 序号。
+    } dma_read_tag_t;
 
     typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
 
@@ -1169,12 +1205,27 @@ package smartnic_pkg;
         logic [ADDR_W-1:0]          pa;               // 经 MR/MW 转换后的物理/DMA 地址。
         logic [DMA_LEN_W-1:0]       len;              // 当前 protected segment 长度。
         logic [KEY_W-1:0]           key;              // 本次实际使用的 lkey 或 rkey。
+        logic [15:0]                flags;            // segment flags，透传给后续 DMA/transport。
         logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;    // WR payload 内字节偏移。
         logic                       is_last;          // 是否是 WR 最后一段。
         logic [5:0]                 access_flags;     // MR/MW entry 的 access_flags。
         mr_ref_token_t              refcount_token;   // 后续 DMA 完成后 ref_dec 使用的 token。
         dma_mr_error_e              error_code;       // protected path 错误码；成功为 NONE。
     } protected_dma_segment_t;
+
+    typedef struct packed {
+        logic [15:0]                desc_id;          // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]         qpn;              // payload 所属 QPN。
+        logic [VF_ID_W-1:0]         owner_function;   // payload 所属 function。
+        mr_operation_e              operation;        // payload 对应 operation。
+        logic [DMA_PAYLOAD_DATA_W-1:0] data;          // 从 host memory 读出的 payload 数据。
+        logic [15:0]                len;              // 本拍 payload 有效字节数。
+        logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;    // WR payload 内偏移。
+        logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 来源 segment index。
+        logic                       segment_last;     // 当前 segment 的最后一个 read chunk。
+        logic                       wqe_last;         // 当前 WQE/WR 的最后一个 payload chunk。
+        dma_host_read_error_e       error_code;       // payload path 错误码；正常为 NONE。
+    } dma_payload_stream_t;
 
     typedef struct packed {
         logic [VF_ID_W-1:0]         owner_func;      // completion 所属 PF/VF function。

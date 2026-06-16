@@ -41,6 +41,7 @@
 | `test_dma_wqe_sge_fetcher.py` | `rtl/dma/dma_wqe_sge_fetcher.sv` | SQ/RQ WQE fetch 地址计算、WQE decode、inline SGE、extended SGE fetch、256 SGE 边界、backpressure |
 | `test_dma_sge_traversal.py` | `rtl/dma/dma_sge_traversal.sv` | SGE total-length accounting、byte_offset、256 SGE、zero-length 拒绝、overlap 检查、index 顺序、backpressure |
 | `test_dma_mr_integration.py` | `rtl/dma/dma_mr_integration.sv` | 每个 DMA segment 的 lkey/rkey 方向、access_flags、PD、bounds、MW 状态、refcount increment 和 protected segment backpressure |
+| `test_dma_host_read_path.py` | `rtl/dma/dma_host_read_path.sv` | Send/RDMA Write protected segment 到 PCIe read request、read response 到 payload stream、tag/length/error 检查、payload backpressure、refcount release |
 
 ## 运行方式
 
