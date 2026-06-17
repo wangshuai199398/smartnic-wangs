@@ -1,42 +1,42 @@
-## Context
+## 背景
 
-This change defines a greenfield RDMA SmartNIC design capability. The target system is a prototype-verifiable high-performance NIC that attaches to the host through PCIe Gen5 x16, exposes RDMA Verbs semantics to software, and processes RoCEv2 traffic in hardware.
+本变更定义一套全新的 RDMA SmartNIC 设计能力。目标系统是一款可原型验证的高性能智能网卡，通过 PCIe Gen5 x16 与主机连接，向软件暴露 RDMA Verbs 语义，并以硬件处理 RoCEv2 流量。
 
-The system is split into four implementation layers:
+系统划分为四个实现层次：
 
-1. **Hardware RTL**: PCIe endpoint, BAR/CSR register block, Doorbell capture, QP/CQ/MR managers, scatter-gather DMA, packet parser/builder, RoCEv2 transport, completion engine, MSI-X, SR-IOV, PFC/ECN/DCQCN, and top-level integration.
-2. **Linux kernel driver**: PCIe probe/remove, CSR mailbox command submission, character device control plane, resource lifecycle, mmap Doorbell, DMA memory management, MSI-X interrupts, SR-IOV, and RDMA-facing operations.
-3. **Userspace Verbs library**: libibverbs-compatible provider surface for device discovery, context management, PD/CQ/QP/MR/AH lifecycle, work request posting, CQ polling, notification, and async events.
-4. **Verification and compatibility**: Cocotb/Verilator simulation, PCIe/Ethernet BFMs, host memory model, scoreboard, coverage, protocol compliance, perftest, UCX, and libfabric validation.
+1. 硬件 RTL：PCIe 端点、BAR/CSR 寄存器块、Doorbell 捕获、QP/CQ/MR 管理器、Scatter-Gather DMA、数据包解析器/构造器、RoCEv2 传输、完成引擎、MSI-X、SR-IOV、PFC/ECN/DCQCN，以及顶层集成。
+2. Linux 内核驱动：PCIe probe/remove、CSR 邮箱命令提交、字符设备控制面、资源生命周期管理、mmap Doorbell、DMA 内存管理、MSI-X 中断、SR-IOV 以及面向 RDMA 的操作接口。
+3. 用户态 Verbs 库：与 libibverbs 兼容的 provider 接口，涵盖设备发现、上下文管理、PD/CQ/QP/MR/AH 生命周期、工作请求提交、CQ 轮询、通知和异步事件。
+4. 验证与兼容性：Cocotb/Verilator 仿真、PCIe/以太网 BFM、主机内存模型、记分板、覆盖率、协议一致性测试，以及 perftest、UCX、libfabric 验证。
 
-The first implementation target is FPGA prototype validation with vendor PCIe/MAC IP wrappers where required. The internal architecture must stay vendor-neutral so the same RTL partition can later be hardened for ASIC without changing the software-visible ABI.
+首个实现目标为 FPGA 原型验证，在需要时使用厂商的 PCIe/MAC IP 封装。内部架构必须保持厂商中立，使同一套 RTL 划分可以后续硬化用于 ASIC，同时不改变软件可见的 ABI。
 
-## Goals / Non-Goals
+## 目标 / 非目标
 
-**Goals:**
+目标：
 
-- Define a modular RDMA SmartNIC architecture that can be implemented and verified incrementally.
-- Support PCIe Gen5 x16 host connectivity, BAR/CSR control, Doorbell submission, MSI-X interrupts, and SR-IOV virtualization.
-- Support RoCEv2 over Ethernet with RC and UD QP types.
-- Support RDMA Read, RDMA Write, Send, and Recv operations.
-- Support QP, CQ, MR, PD, AH, Completion Queue, and Doorbell lifecycle management across hardware, driver, and userspace.
-- Support scatter-gather DMA with MR translation, access permission checks, PMTU segmentation, and error completions.
-- Provide a Linux kernel driver control plane with character device ioctls and mmap Doorbell pages.
-- Provide a libibverbs-compatible userspace API suitable for perftest, UCX, and libfabric compatibility testing.
-- Provide a Cocotb/Verilator verification plan with BFMs, scoreboards, coverage, protocol tests, and end-to-end tests.
+- 定义模块化的 RDMA SmartNIC 架构，支持增量实现和验证。
+- 支持 PCIe Gen5 x16 主机连接、BAR/CSR 控制、Doorbell 提交、MSI-X 中断和 SR-IOV 虚拟化。
+- 支持基于以太网的 RoCEv2，支持 RC 和 UD QP 类型。
+- 支持 RDMA Read、RDMA Write、Send、Recv 操作。
+- 支持 QP、CQ、MR、PD、AH、Completion Queue 和 Doorbell 生命周期管理，覆盖硬件、驱动和用户态。
+- 支持 Scatter-Gather DMA，含 MR 地址转换、访问权限检查、PMTU 分段和错误完成通知。
+- 提供 Linux 内核驱动控制面，包含字符设备 ioctl 和 mmap Doorbell 页。
+- 提供与 libibverbs 兼容的用户态 API，适用于 perftest、UCX 和 libfabric 兼容性测试。
+- 提供 Cocotb/Verilator 验证计划，包含 BFM、记分板、覆盖率、协议测试和端到端测试。
 
-**Non-Goals:**
+非目标：
 
-- InfiniBand native link-layer support; v1 is RoCEv2 over Ethernet only.
-- iWARP support.
-- GPU Direct or peer-to-peer device memory in v1.
-- Production Linux upstreaming in the first milestone; the initial driver can be out-of-tree while following upstream conventions.
-- Multi-port NIC support in v1.
-- Full ASIC physical design, timing closure, DFT, package design, or manufacturing signoff.
+- InfiniBand 原生链路层支持；v1 仅支持基于以太网的 RoCEv2。
+- iWARP 支持。
+- GPU Direct 或点对点设备内存（v1 不做）。
+- 首个里程碑中不做 Linux 主线化；初始驱动可以是树外驱动，但遵循主线编码规范。
+- v1 不支持多端口网卡。
+- 不做完整的 ASIC 物理设计、时序收敛、DFT、封装设计或量产签核。
 
-## Hardware Architecture
+## 硬件架构
 
-The hardware is organized as a layered datapath with a separate control plane. The main RTL top level is `smartnic_top`, which binds PCIe, control, RDMA state, DMA, packet processing, and MAC-facing interfaces.
+硬件按分层数据通路加独立控制面的方式组织。RTL 顶层模块为 smartnic_top，将 PCIe、控制、RDMA 状态、DMA、数据包处理和 MAC 侧接口绑定在一起。
 
 ```text
                             Host CPU / Memory
@@ -68,29 +68,29 @@ The hardware is organized as a layered datapath with a separate control plane. T
                        +--------------+
 ```
 
-### RTL Module Partition
+### RTL 模块划分
 
-| Module | Responsibility | Key Inputs | Key Outputs |
+| 模块 | 职责 | 关键输入 | 关键输出 |
 | --- | --- | --- | --- |
-| `pcie_ep` | PCIe Gen5 endpoint wrapper, config space, inbound/outbound TLP adaptation | PCIe hard IP streams, config reads/writes, DMA completions | BAR accesses, DMA requests, MSI-X TLPs, function identity |
-| `bar_mapper` | Decode BAR0/BAR2/BAR4 addresses and offsets | Inbound Memory Read/Write TLPs | Doorbell writes, CSR accesses, MSI-X table accesses |
-| `reg_block` | CSR register file and mailbox command dispatch | BAR2 CSR reads/writes, command parameters | QP/CQ/MR/AH commands, status, errors |
-| `doorbell_decoder` | Decode mmap Doorbell writes | BAR0 writes with requester/function identity | SQ producer update, RQ producer update, CQ arm request |
-| `sriov_guard` | Enforce PF/VF ownership and resource isolation | requester ID, function ID, QPN/CQN/MR handles, BAR offset | allow/deny, security/error counters |
-| `qp_mgr` | QP context table, state machine, SQ/RQ engines | CSR commands, Doorbells, ingress packet metadata | WQE dispatch, Recv buffer descriptors, QP state updates |
-| `cq_mgr` | CQ context table, producer/consumer state, arm and moderation | completion events, CQ arm writes, consumer updates | CQE write requests, MSI-X requests, overflow status |
-| `mr_mgr` | MR/MW table, lkey/rkey lookup, permission and PD checks | MR commands, DMA lookup requests, remote access requests | PA translation, access grant/deny, MR refcount |
-| `dma_engine` | Scatter-gather host memory read/write engine | WQE descriptors, SGE lists, MR translations | PCIe MemRd/MemWr requests, payload streams, DMA errors |
-| `packet_parser` | Parse Ethernet/IPv4/UDP/BTH/extended RoCEv2 headers | RX MAC stream | opcode, QPN, PSN, RETH/AETH/DETH/ImmDt, payload stream |
-| `packet_builder` | Build RoCEv2 packets and responses | TX descriptors, payload stream, ACK/NAK/CNP requests | TX MAC stream |
-| `roce_engine` | RC/UD transport semantics | parsed packets, QP context, WQE dispatch | DMA commands, ACK/NAK/CNP, completions |
-| `dcqcn_pfc` | ECN/CNP/DCQCN and PFC-aware scheduling | ECN marks, CNP packets, PFC pause state | rate updates, pacing tokens, TX backpressure |
-| `cmpl_engine` | Normalize completion events and format CQEs | QP/DMA/transport results | 64-byte CQEs and CQ write requests |
-| `top_integration` | Clock/reset, CDC, module wiring, wrappers | board-level PCIe/MAC clocks and resets | integrated SmartNIC datapath |
+| `pcie_ep` | PCIe Gen5 端点封装，配置空间，入站/出站 TLP 适配 | PCIe 硬核 IP 流、配置读写、DMA 完成 | BAR 访问、DMA 请求、MSI-X TLP、功能标识 |
+| `bar_mapper` | 解析 BAR0/BAR2/BAR4 地址和偏移量 | 入站 Memory Read/Write TLP | Doorbell 写入、CSR 访问、MSI-X 表访问 |
+| `reg_block` | CSR 寄存器文件和邮箱命令分发 | BAR2 CSR 读写、命令参数 | QP/CQ/MR/AH 命令、状态、错误 |
+| `doorbell_decoder` | 解析 mmap Doorbell 写入 | BAR0 写入（含请求者/功能标识） | SQ 生产者更新、RQ 生产者更新、CQ arm 请求 |
+| `sriov_guard` | 强制 PF/VF 所有权和资源隔离 | 请求者 ID、功能 ID、QPN/CQN/MR 句柄、BAR 偏移量 | 允许/拒绝、安全/错误计数器 |
+| `qp_mgr` | QP 上下文表、状态机、SQ/RQ 引擎 | CSR 命令、Doorbell、入站数据包元数据 | WQE 分发、Recv 缓冲区描述符、QP 状态更新 |
+| `cq_mgr` | CQ 上下文表、生产者/消费者状态、arm 和中断调节 | 完成事件、CQ arm 写入、消费者更新 | CQE 写入请求、MSI-X 请求、溢出状态 |
+| `mr_mgr` | MR/MW 表、lkey/rkey 查找、权限和 PD 检查 | MR 命令、DMA 查找请求、远程访问请求 | 物理地址转换、访问允许/拒绝、MR 引用计数 |
+| `dma_engine` | Scatter-Gather 主机内存读写引擎 | WQE 描述符、SGE 列表、MR 转换结果 | PCIe MemRd/MemWr 请求、有效载荷流、DMA 错误 |
+| `packet_parser` | 解析以太网/IPv4/UDP/BTH/扩展 RoCEv2 头部 | RX MAC 流 | 操作码、QPN、PSN、RETH/AETH/DETH/ImmDt、有效载荷流 |
+| `packet_builder` | 构造 RoCEv2 数据包和响应 | TX 描述符、有效载荷流、ACK/NAK/CNP 请求 | TX MAC 流 |
+| `roce_engine` | RC/UD 传输语义 | 解析后的数据包、QP 上下文、WQE 分发 | DMA 命令、ACK/NAK/CNP、完成通知 |
+| `dcqcn_pfc` | ECN/CNP/DCQCN 和 PFC 感知调度 | ECN 标记、CNP 数据包、PFC 暂停状态 | 速率更新、令牌速率控制、TX 背压 |
+| `cmpl_engine` | 归一化完成事件并格式化 CQE | QP/DMA/传输结果 | 64 字节 CQE 和 CQ 写入请求 |
+| `top_integration` | 时钟/复位、跨时钟域、模块互连、封装 | 板级 PCIe/MAC 时钟和复位 | 集成后的 SmartNIC 数据通路 |
 
-### Internal Interfaces
+### 内部接口
 
-The RTL should use explicit ready/valid streaming interfaces rather than implicit shared state between blocks. The major internal interfaces are:
+RTL 应在模块间使用显式的 ready/valid 流式接口，而非隐式共享状态。主要内部接口有：
 
 - **CSR command interface**: `cmd_valid`, `cmd_opcode`, `cmd_func`, `cmd_args`, `cmd_ready`, `rsp_valid`, `rsp_status`, `rsp_data`.
 - **Doorbell interface**: `db_valid`, `db_type`, `db_func`, `db_qpn_or_cqn`, `db_producer_idx`, `db_consumer_idx`, `db_solicited_only`.
@@ -116,9 +116,9 @@ userspace WQE write
   -> cmpl_engine writes send completion when signaled and transport rules allow
 ```
 
-For Send, the payload is read from local SGEs and delivered to the peer's RQ. For RDMA Write, the local payload is read through DMA and packetized with remote virtual address and rkey in RETH. RC QPs require PSN tracking and ACK/NAK handling; UD QPs use AH/DETH metadata and do not maintain RC sequencing state.
+Send 操作从本地 SGE 读取数据，送到对端的 RQ。RDMA Write 通过 DMA 读取本地数据，用 RETH 携带远程虚拟地址和 rkey 组包发送。RC QP 需要 PSN 追踪和 ACK/NAK 处理；UD QP 使用 AH/DETH 元数据，不维护 RC 序列状态。
 
-### Receive / Send RX Path
+### Receive / Send 接收路径
 
 ```text
 MAC RX
@@ -130,29 +130,29 @@ MAC RX
   -> cq_mgr writes CQE and optionally triggers MSI-X
 ```
 
-Ingress packets must not consume RQ entries until the packet is recognized as valid for the target QP. Invalid packets are dropped before DMA side effects. RC sequence errors produce ACK/NAK behavior without delivering out-of-order payload to host memory.
+入站数据包在确认对目标 QP 有效之前不得消耗 RQ 条目。无效数据包在产生 DMA 副作用前即被丢弃。RC 序列错误会触发 ACK/NAK 行为，不会将乱序数据写入主机内存。
 
 ### RDMA Read Path
 
-RDMA Read has two asymmetric halves:
+RDMA Read 有两个不对称的半边：
 
-- **Requester side**: SQ engine dispatches RDMA Read, packet builder sends read request, response packets are matched by QP/PSN, DMA writes response payload into local SGEs, and completion is generated after all requested bytes arrive.
-- **Responder side**: parser receives read request, mr_mgr validates remote rkey and access permissions, dma_engine reads local memory, packet_builder sends one or more read response packets.
+- **Requester side**: SQ 引擎分发 RDMA Read，packet_builder 发送 Read Request，响应数据包按 QP/PSN 匹配，DMA 将响应载荷写入本地 SGE，所有请求字节到达后生成完成通知。
+- **Responder side**: parser 接收 Read Request，mr_mgr 验证远程 rkey 和访问权限，dma_engine 读取本地内存，packet_builder 发送一个或多个 Read Response 数据包。
 
-The requester must track outstanding read requests per QP and match responses to the original WR. The responder must segment responses by PMTU and respect RC sequencing.
+请求方必须跟踪每个 QP 未完成的 Read 请求，并将响应匹配到原始 WR。响应方必须按 PMTU 分段响应，并遵守 RC 序列规则。
 
-### CQE and Interrupt Path
+### CQE 和中断路径
 
-Completion events from QP, DMA, and transport are normalized by `cmpl_engine`. `cq_mgr` writes 64-byte CQEs to host memory through DMA/PCIe MemWr and updates the CQ producer index. MSI-X is generated when:
+来自 QP、DMA 和传输的完成事件由 cmpl_engine 归一化处理。cq_mgr 通过 DMA/PCIe MemWr 将 64 字节 CQE 写入主机内存，并更新 CQ 生产者索引。MSI-X 在以下情况下产生：
 
-- CQ is armed and the completion satisfies the arm condition.
-- interrupt moderation count reaches the configured threshold.
-- moderation timer expires.
-- asynchronous events such as QP fatal, CQ overflow, or device removal occur.
+- CQ 处于 arm 状态，且完成事件满足 arm 条件
+- 中断调节计数器达到配置阈值
+- 调节定时器到期
+- 发生异步事件（如 QP 致命错误、CQ 溢出或设备移除）
 
 ## Control Path Design
 
-Control traffic uses BAR2 CSR space and a mailbox command model. The driver writes command parameters, writes a GO bit, polls or waits for DONE, and reads status/error fields.
+控制流量使用 BAR2 CSR 空间和邮箱命令模型。驱动写入命令参数，写 GO 位，轮询或等待 DONE，然后读取状态/错误字段。
 
 ```text
 driver ioctl
@@ -164,19 +164,19 @@ driver ioctl
   -> driver returns ioctl result
 ```
 
-The control plane covers:
+控制面覆盖：
 
-- device reset and feature discovery
-- PD allocation and deallocation
-- CQ create, destroy, query, and arm configuration
-- QP create, modify, query, destroy, and error transition
-- MR register, deregister, query, and memory window operations
-- AH create and destroy for UD addressing
-- MSI-X vector configuration and event queue control
-- SR-IOV VF enablement, quota assignment, and per-function cleanup
-- PFC/ECN/DCQCN parameter configuration
+- 设备复位和特性发现
+- PD 分配与释放
+- CQ 创建、销毁、查询和 arm 配置
+- QP 创建、修改、查询、销毁和错误状态转换
+- MR 注册、注销、查询和内存窗口操作
+- AH 创建与销毁（用于 UD 寻址）
+- MSI-X 向量配置和事件队列控制
+- SR-IOV VF 启用、配额分配及每功能清理
+- PFC/ECN/DCQCN 参数配置
 
-Fast-path WQE posting does not use the CSR mailbox. It uses mmap queue buffers plus Doorbell writes.
+快速路径的 WQE 提交不使用 CSR 邮箱，而是通过 mmap 队列缓冲区加 Doorbell 写入实现。
 
 ## Register Interface
 
@@ -184,15 +184,15 @@ Fast-path WQE posting does not use the CSR mailbox. It uses mmap queue buffers p
 
 | BAR | Size | Purpose | Access |
 | --- | --- | --- | --- |
-| BAR0 | 256 MB target | Doorbell aperture for SQ, RQ, and CQ arm pages | mmap write-mostly |
-| BAR2 | 64 KB target | CSR registers and mailbox command interface | driver MMIO |
-| BAR4 | 16 KB target | MSI-X table and pending-bit array | kernel PCI/MSI-X |
+| BAR0 | 256 MB target | SQ、RQ 和 CQ arm 页的 Doorbell 窗口 | mmap write-mostly |
+| BAR2 | 64 KB target | CSR 寄存器和邮箱命令接口 | driver MMIO |
+| BAR4 | 16 KB target | MSI-X 表和 pending-bit 数组 | kernel PCI/MSI-X |
 
 The exact BAR sizes can be adjusted for FPGA prototype constraints, but software-visible offsets must remain stable once the ABI is published.
 
 ### BAR0 Doorbell Aperture
 
-Doorbell pages are assigned per resource and per function. A recommended layout is:
+Doorbell 页面按资源和功能分配。推荐布局：
 
 ```text
 BAR0 + function_base(func)
@@ -202,13 +202,13 @@ BAR0 + function_base(func)
       + 0x010 CQ Arm Doorbell: consumer index + solicited_only
 ```
 
-The hardware decodes QPN/CQN from the page offset and validates ownership using requester/function identity. Doorbell writes from a VF outside its assigned aperture are rejected or ignored without side effects.
+硬件从页面偏移量解码 QPN/CQN，并使用请求者/功能标识验证所有权。VF 在其分配窗口之外的 Doorbell 写入将被拒绝或忽略，不产生副作用。
 
 ### BAR2 CSR Register Groups
 
 | Offset Range | Name | Purpose |
 | --- | --- | --- |
-| `0x0000-0x00ff` | Device control/status | reset, status, feature bits, version, health |
+| `0x0000-0x00ff` | 设备控制/状态 | reset, status, feature bits, version, health |
 | `0x0100-0x01ff` | Mailbox command | command ID, GO/DONE, status, function ID, argument window |
 | `0x0200-0x02ff` | Interrupt control | MSI-X vector mapping, event masks, moderation defaults |
 | `0x0300-0x03ff` | Queue defaults | max QP/CQ/MR, queue depth limits, WQE/CQE size |
@@ -247,8 +247,7 @@ Representative commands:
 
 ### Linux Kernel Driver
 
-The Linux driver owns device initialization, privileged resource management, memory pinning, and mapping of safe fast-path regions to userspace.
-
+Linux 驱动负责设备初始化、特权资源管理、内存 pinning，以及将安全的快速路径区域映射给用户态。
 Recommended file split:
 
 | File | Responsibility |
@@ -269,35 +268,35 @@ Recommended file split:
 
 Driver responsibilities:
 
-- Map BAR0/BAR2/BAR4 and expose only authorized mmap regions.
-- Pin userspace pages for MR registration and convert them into hardware MR table entries.
-- Allocate coherent or DMA-mapped queue buffers for SQ, RQ, and CQ where needed.
-- Track ownership of every PD, CQ, QP, MR, AH, Doorbell page, and mmap offset per file descriptor and per PF/VF.
-- Clean up resources on process exit, device hot-remove, driver unload, and VF disable.
-- Return Linux errno-compatible failures for mailbox status codes.
+- 映射 BAR0/BAR2/BAR4，仅暴露已授权的 mmap 区域
+- Pin 住用户态页面用于 MR 注册，转换为硬件 MR 表条目
+- 为 SQ、RQ、CQ 分配一致性或 DMA 映射的队列缓冲区
+- 跟踪每个 PD、CQ、QP、MR、AH、Doorbell 页和 mmap 偏移量在文件描述符和 PF/VF 维度的所有权
+- 在进程退出、设备热移除、驱动卸载和 VF 禁用时清理资源
+- 将邮箱状态码映射为 Linux errno 兼容的错误返回
 
-### Character Device and ioctl Surface
+### 字符设备和 ioctl 接口
 
 The first implementation can expose `/dev/smartnicX` or `/dev/infiniband/uverbsX`-compatible control. The stable ioctl set should include:
 
 | ioctl | Purpose | Key Outputs |
 | --- | --- | --- |
-| `QUERY_DEVICE` | Read device capabilities | max QP/CQ/MR, WQE/CQE sizes, feature bits |
-| `ALLOC_PD` / `DEALLOC_PD` | Manage protection domains | PD handle |
-| `CREATE_CQ` / `DESTROY_CQ` | Manage completion queues | CQN, CQ mmap offset, CQ arm Doorbell offset |
-| `CREATE_QP` / `MODIFY_QP` / `QUERY_QP` / `DESTROY_QP` | Manage queue pairs | QPN, SQ/RQ mmap offsets, Doorbell offsets |
-| `REG_MR` / `DEREG_MR` | Register and deregister memory | MR handle, lkey, rkey |
-| `CREATE_AH` / `DESTROY_AH` | Manage UD address handles | AH handle |
-| `GET_EVENT` | Retrieve async events | event type, QPN/CQN/port |
+| `QUERY_DEVICE` | 读取设备能力 | max QP/CQ/MR, WQE/CQE sizes, feature bits |
+| `ALLOC_PD` / `DEALLOC_PD` | 管理保护域 | PD handle |
+| `CREATE_CQ` / `DESTROY_CQ` | 管理完成队列 | CQN, CQ mmap offset, CQ arm Doorbell offset |
+| `CREATE_QP` / `MODIFY_QP` / `QUERY_QP` / `DESTROY_QP` | 管理队列对 | QPN, SQ/RQ mmap offsets, Doorbell offsets |
+| `REG_MR` / `DEREG_MR` | 注册与注销内存 | MR handle, lkey, rkey |
+| `CREATE_AH` / `DESTROY_AH` | 管理 UD 地址句柄 | AH handle |
+| `GET_EVENT` | 获取异步事件 | event type, QPN/CQN/port |
 
 ### mmap Model
 
-The driver returns opaque mmap offsets to userspace. Userspace never invents offsets. The VMA fault or mmap handler validates:
+驱动向用户态返回不透明的 mmap 偏移量，用户态不得自行构造偏移量。VMA fault 或 mmap 处理程序验证：
 
-- file descriptor owns the resource
-- resource is still alive
-- PF/VF function matches the owner
-- requested size and protection bits match the mapping type
+- 文件描述符拥有该资源
+- 资源仍然存活
+- PF/VF 功能匹配所有者
+- 请求的大小和保护位匹配映射类型
 
 Mapping types:
 
@@ -308,9 +307,9 @@ Mapping types:
 - QP RQ Doorbell page
 - CQ arm Doorbell page
 
-### Userspace Verbs Library
+### 用户态 Verbs 库
 
-The userspace library translates Verbs API calls into driver ioctls and fast-path mmap writes. The API surface includes:
+用户态库将 Verbs API 调用转换为驱动 ioctl 和快速路径 mmap 写入。API 包括：
 
 - device discovery: `ibv_get_device_list`, `ibv_free_device_list`, `ibv_get_device_name`
 - context: `ibv_open_device`, `ibv_close_device`
@@ -325,130 +324,130 @@ The userspace library translates Verbs API calls into driver ioctls and fast-pat
 
 Fast-path rules:
 
-- `ibv_post_send` formats one or more hardware WQEs into the SQ buffer, uses a release barrier, then writes one SQ Doorbell for the batch.
-- `ibv_post_recv` formats one or more receive WQEs into the RQ buffer, uses a release barrier, then writes one RQ Doorbell for the batch.
-- `ibv_poll_cq` reads CQEs from the mmap CQ buffer, converts them to `ibv_wc`, advances the consumer index, and optionally updates hardware-visible consumer state.
-- `ibv_req_notify_cq` writes the CQ arm Doorbell with consumer index and solicited-only state.
+- ibv_post_send 将一个或多个硬件 WQE 格式化写入 SQ 缓冲区，使用 release barrier，然后为该批次写一次 SQ Doorbell
+- ibv_post_recv 将一个或多个接收 WQE 格式化写入 RQ 缓冲区，使用 release barrier，然后为该批次写一次 RQ Doorbell
+- ibv_poll_cq 从 mmap CQ 缓冲区读取 CQE，转换为 ibv_wc，推进消费者索引，可选择性更新硬件可见的消费者状态
+- ibv_req_notify_cq 写入 CQ arm Doorbell，携带消费者索引和 solicited-only 状态
 
-Compatibility target:
+兼容性目标：
 
 - perftest: RC Send, RDMA Write, RDMA Read
 - UCX: verbs-backed RC smoke tests
 - libfabric: verbs provider smoke tests for supported operations
 - UD: basic Send/Recv and AH behavior
 
-## Verification Architecture
+## 验证架构
 
-The verification environment uses Cocotb/Verilator for development feedback and regression.
+验证环境使用 Cocotb/Verilator 进行开发反馈和回归测试。
 
-Testbench components:
+测试平台组件：
 
-- **PCIe BFM**: configuration cycles, Memory Read/Write TLPs, completions, MSI-X, requester/function identity.
-- **Ethernet/RoCE BFM**: packet construction and parsing for RoCEv2 opcodes, ACK/NAK, CNP, invalid packet injection.
-- **Host memory model**: byte-addressable memory backing DMA reads/writes and CQ buffer observation.
-- **Scoreboard**: WR-to-CQE matching, payload comparison, PSN tracking, retry behavior, CQ overflow, and error status checking.
-- **Coverage model**: opcodes, QP states, QP types, completion statuses, MR permissions, message sizes, SGE counts, congestion events, and SR-IOV access cases.
+- PCIe BFM：配置周期、Memory Read/Write TLP、完成、MSI-X、请求者/功能标识
+- 以太网/RoCE BFM：RoCEv2 操作码的数据包构造与解析、ACK/NAK、CNP、无效数据包注入
+- 主机内存模型：字节可寻址内存，支持 DMA 读写和 CQ 缓冲区观察
+- 记分板：WR 到 CQE 匹配、载荷比较、PSN 追踪、重试行为、CQ 溢出和错误状态检查
+- 覆盖率模型：操作码、QP 状态、QP 类型、完成状态、MR 权限、消息大小、SGE 数量、拥塞事件和 SR-IOV 访问场景
 
-Verification stages:
+验证阶段：
 
-1. Module tests for PCIe, BAR, CSR, Doorbell, QP, CQ, MR, DMA, packet parser/builder, RC/UD, and congestion modules.
-2. Integration tests for Doorbell-to-CQE, RC Send/Recv, RDMA Write, RDMA Read, UD Send/Recv, MSI-X, and SR-IOV isolation.
-3. Protocol compliance tests for RoCEv2 headers, ACK/NAK, RNR, DETH/RETH/AETH, immediate data, invalid packet drop, and ICRC behavior.
-4. Compatibility tests using userspace examples, perftest, UCX, and libfabric where the simulation/prototype environment permits.
-5. Performance tests for Doorbell-to-CQE latency, Doorbell-to-wire latency, DMA bandwidth, packet rate, completion rate, and interrupt moderation behavior.
+1. 模块测试：PCIe、BAR、CSR、Doorbell、QP、CQ、MR、DMA、数据包解析器/构造器、RC/UD 和拥塞模块
+2. 集成测试：Doorbell 到 CQE、RC Send/Recv、RDMA Write、RDMA Read、UD Send/Recv、MSI-X 和 SR-IOV 隔离
+3. 协议一致性测试：RoCEv2 头部、ACK/NAK、RNR、DETH/RETH/AETH、立即数据、无效数据包丢弃和 ICRC 行为
+4. 兼容性测试：使用用户态示例程序、perftest、UCX 和 libfabric（在仿真/原型环境允许的情况下）
+5. 性能测试：Doorbell 到 CQE 延迟、Doorbell 到线缆延迟、DMA 带宽、数据包速率、完成速率和中断调节行为
 
-## Decisions
+## 设计决策
 
-### D1: Layered RTL Architecture
+### D1：分层 RTL 架构
 
-The RTL SHALL be split into PCIe, register/control, DMA, QP manager, CQ manager, MR manager, packet parser, packet builder, RoCEv2 engine, completion engine, congestion control, virtualization, and top-level integration blocks.
+RTL 必须拆分为 PCIe、寄存器/控制、DMA、QP 管理器、CQ 管理器、MR 管理器、数据包解析器、数据包构造器、RoCEv2 引擎、完成引擎、拥塞控制、虚拟化和顶层集成模块。
 
-Rationale: PCIe transport, RDMA state, memory protection, and packet processing have different timing and verification concerns. Layering makes module-level tests practical and allows incremental integration.
+理由：PCIe 传输、RDMA 状态、内存保护和数据包处理具有不同的时序和验证关注点。分层使得模块级测试切实可行，并允许增量集成。
 
-Alternative considered: a monolithic RDMA engine. It was rejected because it makes protocol, DMA, and resource-management bugs difficult to isolate.
+备选方案（已否决）：单块 RDMA 引擎——使协议、DMA 和资源管理类 bug 难以隔离。
 
-### D2: Doorbell-Based Fast Path
+### D2: 基于 Doorbell 的快速路径
 
-The userspace library SHALL mmap Doorbell pages and queue buffers where appropriate. Work requests are written into host-visible queues and submitted by a single MMIO Doorbell write.
+用户态库必须 mmap Doorbell 页和队列缓冲区。工作请求写入主机可见队列，通过单次 MMIO Doorbell 写入提交。
 
-Rationale: This follows the standard RDMA fast path and avoids syscall overhead for every work request.
+理由：遵循标准 RDMA 快速路径，避免每个工作请求产生系统调用开销。
 
-Alternative considered: ioctl-per-WR submission. It was rejected because it cannot meet low-latency and high-throughput RDMA requirements.
+备选方案（已否决）：每个 WR 使用 ioctl 提交——无法满足 RDMA 低延迟和高吞吐量的要求。
 
-### D3: Hardware QP/CQ/MR State, Software Control Plane
+### D3: 硬件管理 QP/CQ/MR 状态，软件管理控制面
 
-The driver owns resource creation, teardown, memory pinning, and policy. Hardware owns QP state used on the datapath, CQE production, MR key/address/permission checks, and DMA execution.
+驱动负责资源创建、销毁、内存 pinning 和策略。硬件负责数据通路使用的 QP 状态、CQE 生成、MR key/地址/权限检查和 DMA 执行。
 
-Rationale: This division keeps rare control operations flexible in software while keeping high-frequency packet and DMA operations in hardware.
+理由：这种划分使低频控制操作在软件中保持灵活，同时将高频数据包和 DMA 操作保留在硬件中。
 
-### D4: CSR Mailbox for Resource Management
+### D4: CSR 邮箱用于资源管理
 
-The driver SHALL use a CSR mailbox command protocol for QP/CQ/MR/AH/PD management commands. Each command includes operation ID, parameters, owner/function identity where applicable, GO/DONE status, and error reporting.
+驱动必须使用 CSR 邮箱命令协议进行 QP/CQ/MR/AH/PD 管理命令。每条命令包含操作 ID、参数、所有者/功能标识、GO/DONE 状态和错误报告。
 
-Rationale: A mailbox gives the driver a stable hardware ABI while allowing internal RTL modules to evolve.
+理由：邮箱为驱动提供稳定的硬件 ABI，同时允许内部 RTL 模块独立演进。
 
-### D5: libibverbs-Compatible Userspace Surface
+### D5: 兼容 libibverbs 的用户态接口
 
-The userspace library SHALL provide familiar Verbs APIs including device discovery, open/close, query, PD/CQ/QP/MR/AH lifecycle, post_send, post_recv, poll_cq, req_notify_cq, and async events.
+用户态库必须提供熟悉的 Verbs API，包括设备发现、open/close、查询、PD/CQ/QP/MR/AH 生命周期、post_send、post_recv、poll_cq、req_notify_cq 和异步事件。
 
-Rationale: Compatibility with perftest, UCX, and libfabric is a core adoption requirement.
+理由：与 perftest、UCX 和 libfabric 的兼容性是核心采用需求。
 
-### D6: Cocotb/Verilator First Verification
+### D6: Cocotb/Verilator 优先的验证策略
 
-The project SHALL use Cocotb/Verilator as the primary development verification environment, with Python BFMs for PCIe and Ethernet, a host memory model, scoreboards, and coverage.
+项目必须使用 Cocotb/Verilator 作为主要开发验证环境，包含 PCIe 和以太网的 Python BFM、主机内存模型、记分板和覆盖率。
 
-Rationale: Python-based verification accelerates packet generation, randomized testing, and scoreboard development. Commercial simulators and formal tools can be added later for signoff.
+理由：基于 Python 的验证加速数据包生成、随机化测试和记分板开发。商用仿真器和形式化工具可在后续签核阶段加入。
 
-### D7: Incremental Prototype Milestones
+### D7: 增量原型里程碑
 
-Implementation SHOULD proceed through milestones:
+实现应按里程碑推进：
 
-1. CSR/Doorbell/QP/CQ minimal completion loop.
-2. DMA memory read/write loopback.
-3. RC Send/Recv in simulation.
-4. RDMA Write/Read in simulation.
-5. UD Send/Recv.
-6. Driver and userspace integration.
-7. perftest/UCX/libfabric compatibility.
-8. FPGA prototype.
+1. CSR/Doorbell/QP/CQ 最小完成环路
+2. DMA 内存读写回环
+3. 仿真中 RC Send/Recv
+4. 仿真中 RDMA Write/Read
+5. UD Send/Recv
+6. 驱动与用户态集成
+7. perftest/UCX/libfabric 兼容性
+8. FPGA 原型
 
-Rationale: A full RDMA NIC has too many moving pieces to validate all at once. A staged plan keeps each milestone observable.
+理由：完整的 RDMA NIC 有太多活动部件，无法一次性全部验证。分阶段计划使每个里程碑都可观测。
 
-### D8: Vendor-Neutral Core with FPGA Wrappers
+### D8: 厂商中立核心 + FPGA 封装
 
-The core RTL SHALL use vendor-neutral internal streaming and command interfaces. Vendor-specific PCIe and MAC IP shall be isolated behind wrappers.
+核心 RTL 必须使用厂商中立的内部流和命令接口。厂商特定的 PCIe 和 MAC IP 应隔离在封装层之后。
 
-Rationale: FPGA prototyping may require Xilinx or Intel hard IP, but the SmartNIC architecture should remain portable and ASIC-ready.
+理由：FPGA 原型可能使用 Xilinx 或 Intel 硬核 IP，但 SmartNIC 架构应保持可移植性，为 ASIC 就绪。
 
-### D9: Hardware-Enforced SR-IOV Isolation
+### D9: 硬件强制 SR-IOV 隔离
 
-PF/VF ownership SHALL be tracked in hardware-visible resource tables and checked on CSR, Doorbell, and datapath access.
+PF/VF 所有权必须在硬件可见的资源表中记录，并在 CSR、Doorbell 和数据通路访问中检查。
 
-Rationale: VF isolation cannot rely only on driver allocation policy. Hardware must reject cross-function accesses even if software is compromised or buggy.
+理由：VF 隔离不能仅依赖驱动分配策略。即使软件受到攻击或存在 bug，硬件也必须拒绝跨功能访问。
 
-## Risks / Trade-offs
+## 风险与权衡
 
-- **[Scope size]** The complete SmartNIC spans RTL, driver, userspace, and verification. -> Mitigation: implement in milestone order and keep acceptance tests per milestone.
-- **[PCIe Gen5 and 100GbE IP dependencies]** FPGA platforms may require vendor PCIe/MAC wrappers. -> Mitigation: define vendor-neutral internal interfaces and isolate wrappers.
-- **[RoCEv2 interoperability]** Real NICs and switches differ in edge behavior. -> Mitigation: include protocol compliance tests plus soft-roce and perftest compatibility tests.
-- **[libibverbs ABI drift]** A hand-written provider can diverge from expected Verbs semantics. -> Mitigation: test against perftest, UCX, and libfabric early.
-- **[Simulation performance]** Full-system Verilator tests can be slow. -> Mitigation: prioritize module-level tests, use scoreboards, and reserve long tests for regression.
-- **[SR-IOV isolation]** VF isolation must be enforced in hardware, not just in driver policy. -> Mitigation: include requester/function ownership in CSR, Doorbell, and resource tables.
-- **[MR security and correctness]** Incorrect key, PD, or bounds checks can corrupt host memory. -> Mitigation: keep MR lookup centralized and require all DMA paths to use it.
-- **[Register ABI stability]** Early CSR layout changes can break driver and userspace tests. -> Mitigation: version the ABI and reserve space in each register group.
+- 范围规模：完整 SmartNIC 涵盖 RTL、驱动、用户态和验证 -> 缓解：按里程碑顺序实现，每个里程碑保持独立的验收测试
+- PCIe Gen5 和 100GbE IP 依赖：FPGA 平台可能需要厂商 PCIe/MAC 封装 -> 缓解：定义厂商中立的内部接口，隔离封装层
+- RoCEv2 互操作性：真实网卡和交换机在边缘行为上存在差异 -> 缓解：包含协议一致性测试和 soft-roce、perftest 兼容性测试
+- libibverbs ABI 漂移：手写的 provider 可能偏离预期的 Verbs 语义 -> 缓解：尽早用 perftest、UCX 和 libfabric 进行测试
+- 仿真性能：全系统 Verilator 测试可能很慢 -> 缓解：优先模块级测试，使用记分板，将长时间测试留到回归阶段
+- SR-IOV 隔离：VF 隔离必须在硬件中强制执行，不能仅靠驱动策略 -> 缓解：在 CSR、Doorbell 和资源表中包含请求者/功能所有权
+- MR 安全性和正确性：错误的 key、PD 或边界检查可能破坏主机内存 -> 缓解：保持 MR 查找集中化，要求所有 DMA 路径使用
+- 寄存器 ABI 稳定性：早期 CSR 布局变更可能破坏驱动和用户态测试 -> 缓解：对 ABI 进行版本管理，每个寄存器组预留空间
 
-## Migration Plan
+## 迁移计划
 
-This is a new capability, so there is no runtime migration. Implementation should begin by creating the source tree and test infrastructure, then proceed through the milestone sequence in D7.
+这是一个全新能力，不存在运行时迁移。实现应从创建源码树和测试基础设施开始，然后按照 D7 中的里程碑序列推进。
 
-Rollback strategy for implementation changes is per milestone: each milestone must keep its tests passing before the next milestone begins. If a milestone fails, revert or disable only that milestone's new integration while keeping lower-level module tests intact.
+实现变更的回滚策略按里程碑执行：每个里程碑必须保持其测试通过才能进入下一个里程碑。如果某个里程碑失败，回滚或仅禁用该里程碑的新集成，同时保持低层模块测试不受影响。
 
-## Open Questions
+## 待解决问题
 
-- Which FPGA board is the first prototype target: Xilinx Alveo, Intel Agilex, or another platform?
-- Which 100GbE MAC and PCIe endpoint IP wrappers will be used for FPGA prototype builds?
-- Should the userspace library be a standalone libsmartnic shim first, or a proper libibverbs provider plugin from the beginning?
-- What minimum compatibility matrix is required for perftest, UCX, and libfabric before considering the prototype usable?
-- What QP/CQ/MR scale is required for v1 FPGA prototype versus final ASIC target?
-- Should BAR0 expose one 4KB Doorbell page per QP/CQ, or should it use a compressed aperture with explicit resource IDs in the Doorbell payload?
-- Should CQ consumer index updates be written through a CQ Doorbell or maintained purely in host memory with periodic hardware reads?
+- 首个 FPGA 原型目标板卡：Xilinx Alveo、Intel Agilex 还是其他平台？
+- FPGA 原型构建中 100GbE MAC 和 PCIe 端点 IP 封装应使用哪个？
+- 用户态库是否先作为独立的 libsmartnic 适配层，还是一开始就做正式的 libibverbs provider 插件？
+- perftest、UCX 和 libfabric 的最低兼容性矩阵是什么，原型才算可用？
+- v1 FPGA 原型的 QP/CQ/MR 规模要求与最终 ASIC 目标有何不同？
+- BAR0 应该为每个 QP/CQ 暴露一个 4KB Doorbell 页，还是使用压缩窗口并在 Doorbell 载荷中携带显式资源 ID？
+- CQ 消费者索引更新应通过 CQ Doorbell 写入，还是纯在主机内存中维护并由硬件周期性读取？
