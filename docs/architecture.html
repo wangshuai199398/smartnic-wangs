@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDMA SmartNIC 硬件架构详解</title>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --text: #212529;
+    --text-secondary: #6c757d;
+    --border: #dee2e6;
+    --accent: #2563eb;
+    --accent-light: #eff6ff;
+    --success: #16a34a;
+    --success-light: #f0fdf4;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --purple: #7c3aed;
+    --purple-light: #f5f3ff;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px; height: 52px;
+    display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  nav .logo { font-weight: 700; font-size: 17px; color: var(--accent); white-space: nowrap; }
+  nav a { color: var(--text-secondary); text-decoration: none; font-size: 13px; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+  nav a:hover { color: var(--accent); background: var(--accent-light); }
+
+  /* ── Layout ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 76px 24px 80px; }
+
+  /* ── Hero ── */
+  .hero {
+    text-align: center; padding: 48px 0 32px;
+  }
+  .hero h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+  .hero .subtitle { color: var(--text-secondary); font-size: 1.05rem; }
+  .hero .badges { margin-top: 16px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    display: inline-block; padding: 4px 14px; border-radius: 20px;
+    font-size: 12px; font-weight: 600;
+  }
+  .badge-sv { background: #dbeafe; color: #1d4ed8; }
+  .badge-py { background: #fef3c7; color: #92400e; }
+  .badge-hw { background: #d1fae5; color: #065f46; }
+
+  /* ── TOC ── */
+  .toc {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px 28px; margin: 24px 0 40px; box-shadow: var(--shadow);
+  }
+  .toc h2 { font-size: 1.1rem; margin-bottom: 12px; }
+  .toc ol { padding-left: 20px; columns: 2; column-gap: 32px; }
+  .toc li { margin-bottom: 4px; break-inside: avoid; }
+  .toc a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* ── Section ── */
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 1.55rem; font-weight: 700; margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--accent);
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .num { background: var(--accent); color: #fff; border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  h3 {
+    font-size: 1.2rem; font-weight: 600; margin: 32px 0 12px;
+    padding: 8px 14px; background: var(--accent-light); border-radius: 8px;
+    border-left: 4px solid var(--accent);
+  }
+  h4 { font-size: 1rem; font-weight: 600; margin: 24px 0 8px; color: #374151; }
+  p { margin-bottom: 12px; }
+
+  /* ── Diagram ── */
+  .diagram {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; margin: 20px 0; overflow-x: auto;
+    box-shadow: var(--shadow);
+  }
+  .diagram pre {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 12px; line-height: 1.5; white-space: pre;
+  }
+
+  /* ── Card ── */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; box-shadow: var(--shadow);
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  .card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+  .card .card-title { font-weight: 700; font-size: 1rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .card .card-file { font-size: 11px; color: var(--text-secondary); font-family: monospace; margin-bottom: 8px; }
+  .card .card-desc { font-size: 13px; color: #4b5563; line-height: 1.6; }
+
+  /* ── Module Detail ── */
+  .module-detail {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px 28px; margin: 20px 0; box-shadow: var(--shadow);
+  }
+  .module-detail .module-name {
+    font-weight: 700; font-size: 1.1rem; color: var(--accent);
+    font-family: 'SF Mono', monospace; margin-bottom: 4px;
+  }
+  .module-detail .module-path { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+
+  .fn-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .fn-table th {
+    background: #f1f5f9; text-align: left; padding: 8px 12px;
+    font-weight: 600; border-bottom: 2px solid var(--border); font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .fn-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .fn-table tr:hover td { background: #fafbfc; }
+  .fn-name { font-family: 'SF Mono', monospace; font-weight: 600; color: #1e40af; white-space: nowrap; }
+  .fn-type {
+    display: inline-block; padding: 1px 7px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  .fn-type-func { background: #dbeafe; color: #1d4ed8; }
+  .fn-type-input { background: #fef3c7; color: #92400e; }
+  .fn-type-output { background: #d1fae5; color: #065f46; }
+  .fn-type-internal { background: #f3e8ff; color: #6b21a8; }
+
+  /* ── FSM Table ── */
+  .state-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .state-table th { background: #f8fafc; text-align: left; padding: 6px 10px; font-weight: 600; border-bottom: 1px solid var(--border); }
+  .state-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
+  .state-name { font-family: 'SF Mono', monospace; font-weight: 600; white-space: nowrap; }
+
+  /* ── Rationale Box ── */
+  .rationale {
+    background: var(--warning-light); border: 1px solid #fde68a; border-radius: 10px;
+    padding: 16px 20px; margin: 16px 0;
+  }
+  .rationale .rationale-title { font-weight: 700; color: var(--warning); margin-bottom: 6px; font-size: 14px; }
+  .rationale p, .rationale li { font-size: 13px; color: #78350f; margin-bottom: 6px; }
+
+  /* ── Code ── */
+  .code-block {
+    background: var(--code-bg); color: var(--code-text); border-radius: 8px;
+    padding: 16px 20px; margin: 12px 0; overflow-x: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.6;
+  }
+  .code-block .kw { color: #c084fc; }
+  .code-block .ty { color: #67e8f9; }
+  .code-block .cm { color: #94a3b8; font-style: italic; }
+  .code-block .str { color: #86efac; }
+
+  /* ── Flow ── */
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; font-family: 'SF Mono', monospace; font-size: 13px; }
+  .flow-box { padding: 5px 12px; border-radius: 6px; font-weight: 600; background: var(--accent-light); color: var(--accent); border: 1px solid #bfdbfe; }
+  .flow-arrow { color: var(--text-secondary); }
+
+  /* ── Stats ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; text-align: center; box-shadow: var(--shadow);
+  }
+  .stat .stat-num { font-size: 1.8rem; font-weight: 800; color: var(--accent); }
+  .stat .stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+  footer {
+    text-align: center; padding: 40px 0 20px; color: var(--text-secondary); font-size: 13px;
+    border-top: 1px solid var(--border); margin-top: 60px;
+  }
+
+  @media (max-width: 640px) {
+    .toc ol { columns: 1; }
+    .card-grid { grid-template-columns: 1fr; }
+    nav { gap: 6px; }
+    nav a { font-size: 11px; padding: 4px 6px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">🧠 RDMA SmartNIC</span>
+  <a href="#overview">总览</a>
+  <a href="#architecture">系统架构</a>
+  <a href="#pcie">PCIe</a>
+  <a href="#doorbell">Doorbell</a>
+  <a href="#qp">QP</a>
+  <a href="#cq">CQ</a>
+  <a href="#mr">MR</a>
+  <a href="#dma">DMA</a>
+  <a href="#csr">CSR</a>
+  <a href="#package">数据包</a>
+  <a href="#design">设计思想</a>
+</nav>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- HERO -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="hero">
+  <h1>RDMA SmartNIC 硬件架构详解</h1>
+  <p class="subtitle">基于 SystemVerilog 的 RoCEv2 SmartNIC RTL 设计 —— 模块、函数与设计原理全解</p>
+  <div class="badges">
+    <span class="badge badge-sv">SystemVerilog RTL · 38 模块</span>
+    <span class="badge badge-py">Cocotb Python · 36 测试</span>
+    <span class="badge badge-hw">Verilator 仿真</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- TOC -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="toc">
+  <h2>📑 目录</h2>
+  <ol>
+    <li><a href="#overview">项目概览与关键数字</a></li>
+    <li><a href="#architecture">系统顶层架构</a></li>
+    <li><a href="#package">smartnic_pkg.sv —— 核心数据包</a></li>
+    <li><a href="#pcie">PCIe 子系统 (5 模块)</a></li>
+    <li><a href="#doorbell">Doorbell 子系统 (5 模块)</a></li>
+    <li><a href="#qp">QP 子系统 (6 模块)</a></li>
+    <li><a href="#cq">CQ 子系统 (5 模块)</a></li>
+    <li><a href="#mr">MR 子系统 (7 模块)</a></li>
+    <li><a href="#dma">DMA 子系统 (5 模块)</a></li>
+    <li><a href="#csr">CSR Mailbox 子系统 (1 模块)</a></li>
+    <li><a href="#design">整体设计思想与原则</a></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 1. OVERVIEW -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="overview">
+  <h2><span class="num">1</span> 项目概览</h2>
+
+  <p>这是一个<strong>教学型 RDMA (Remote Direct Memory Access) SmartNIC 硬件设计项目</strong>，使用 SystemVerilog 编写 RTL，使用 Python Cocotb + Verilator 进行仿真验证。项目逐步搭建一款支持 RoCEv2 (RDMA over Converged Ethernet v2) 协议的智能网卡。</p>
+
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-num">38</div><div class="stat-label">SystemVerilog 模块</div></div>
+    <div class="stat"><div class="stat-num">36</div><div class="stat-label">Python Cocotb 测试</div></div>
+    <div class="stat"><div class="stat-num">1389</div><div class="stat-label">smartnic_pkg.sv 行数</div></div>
+    <div class="stat"><div class="stat-num">7</div><div class="stat-label">子系统</div></div>
+    <div class="stat"><div class="stat-num">60+</div><div class="stat-label">枚举类型</div></div>
+    <div class="stat"><div class="stat-num">25+</div><div class="stat-label">Packed Struct</div></div>
+  </div>
+
+  <h3>RDMA 核心概念速览</h3>
+  <table class="fn-table">
+    <tr><th>概念</th><th>含义</th><th>硬件中的角色</th></tr>
+    <tr><td><strong>QP</strong> (Queue Pair)</td><td>RDMA 通信通道，含发送队列 SQ 和接收队列 RQ</td><td>保存通信状态、队列地址和索引</td></tr>
+    <tr><td><strong>CQ</strong> (Completion Queue)</td><td>完成通知队列</td><td>硬件写完 CQE 后通知软件</td></tr>
+    <tr><td><strong>MR</strong> (Memory Region)</td><td>注册的网卡可访问内存区域</td><td>权限检查、地址转换、引用计数</td></tr>
+    <tr><td><strong>PD</strong> (Protection Domain)</td><td>资源隔离边界</td><td>防止 QP 访问不属于自己的 MR</td></tr>
+    <tr><td><strong>Doorbell</strong></td><td>软件通知硬件的快速通道</td><td>通过 BAR0 MMIO 写入触发</td></tr>
+    <tr><td><strong>WQE</strong> (Work Queue Entry)</td><td>软件提交给硬件的工作描述</td><td>64 字节 packed struct，含操作类型/地址/key</td></tr>
+    <tr><td><strong>CQE</strong> (Completion Queue Entry)</td><td>硬件返回给软件的完成描述</td><td>64 字节 packed struct，含状态/字节数/WR ID</td></tr>
+    <tr><td><strong>DMA</strong></td><td>硬件直接读写主机内存</td><td>受 MR 保护，含 SGE 遍历和分块传输</td></tr>
+    <tr><td><strong>RoCEv2</strong></td><td>Ethernet/IP/UDP 承载 RDMA</td><td>将 RDMA 操作封装成网络包</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 2. ARCHITECTURE -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="architecture">
+  <h2><span class="num">2</span> 系统顶层架构</h2>
+
+  <p>整个 SmartNIC 硬件分为<strong>控制面</strong>和<strong>数据面</strong>两条路径，通过统一的 valid-ready 握手接口互联。</p>
+
+  <div class="diagram">
+<pre>
+                         ┌──────────────────────────────────────────────────┐
+                         │                  PCIe Endpoint                   │
+                         │  ┌──────────┐ ┌──────────────┐ ┌─────────────┐  │
+                         │  │ BAR      │ │ Config       │ │ Function    │  │
+                         │  │ Decoder  │ │ Space        │ │ Manager     │  │
+                         │  └────┬─────┘ └──────────────┘ └──────┬──────┘  │
+                         │       │                               │          │
+                         │  ┌────┴───────────────────────────────┴───────┐  │
+                         │  │              MSI-X Manager                 │  │
+                         │  └────────────────────────────────────────────┘  │
+                         └──────────────────────────────────────────────────┘
+                              │               │                │
+                       BAR0   │        BAR2   │         BAR4   │
+                              ▼               ▼                ▼
+  ┌─────────────────────────────────┐ ┌──────────────┐ ┌──────────────┐
+  │      Doorbell Subsystem         │ │ CSR Mailbox  │ │ MSI-X Table  │
+  │  ┌────────────┐                 │ │ (控制面入口) │ │   &amp; PBA     │
+  │  │ Decoder    │                 │ └──────┬───────┘ └──────┬───────┘
+  │  └─────┬──────┘                 │        │                │
+  │  ┌─────┴──────┐                 │        │                │
+  │  │ Access     │                 │        │                │
+  │  │ Check      │                 │        │                │
+  │  └─────┬──────┘                 │        │                │
+  │  ┌─────┴──────────────────┐     │        │                │
+  │  │ SQ / RQ / CQ Arm       │     │        │                │
+  │  │ Handler                │     │        │                │
+  │  └────────┬───────────────┘     │        │                │
+  └───────────┼─────────────────────┘        │                │
+              │                              ▼                │
+  ┌───────────┴───────────────────────────────────────────────┴──────┐
+  │                        QP Subsystem                              │
+  │  ┌──────────────┐ ┌─────────────────┐ ┌──────────────────────┐  │
+  │  │ Context      │ │ Lifecycle       │ │ State Validator      │  │
+  │  │ Table        │ │ Manager         │ │ (IBTA状态迁移校验)    │  │
+  │  └──────┬───────┘ └────────┬────────┘ └──────────────────────┘  │
+  │  ┌──────┴───────┐ ┌────────┴────────┐ ┌──────────────────────┐  │
+  │  │ SQ Engine    │ │ RQ Engine       │ │ Cleanup Manager      │  │
+  │  │ (发送引擎)    │ │ (接收引擎)       │ │ (销毁/错误清理)       │  │
+  │  └──────┬───────┘ └────────┬────────┘ └──────────────────────┘  │
+  └─────────┼──────────────────┼────────────────────────────────────┘
+            │                  │
+            ▼                  ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                      DMA Subsystem                                │
+  │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐  │
+  │  │ Descriptor   │ │ WQE/SGE Fetcher  │ │ SGE Traversal        │  │
+  │  │ Dispatcher   │ │ (取出WQE/SGE)     │ │ (SGE规范化)          │  │
+  │  └──────┬───────┘ └────────┬─────────┘ └──────────┬───────────┘  │
+  │  ┌──────┴──────────────────┴──────────────────────┴───────────┐  │
+  │  │                  MR Integration Pipeline                    │  │
+  │  │  key_check → access_check → pd_check → translate → ref_inc │  │
+  │  └──────────────────────────┬─────────────────────────────────┘  │
+  │  ┌──────────────────────────┴─────────────────────────────────┐  │
+  │  │                  Host Read Path                             │  │
+  │  │  (分块 PCIe 读取 + payload 流输出)                           │  │
+  │  └─────────────────────────────────────────────────────────────┘  │
+  └──────────────────────────────────────────────────────────────────┘
+            │
+            ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                    Completion Subsystem                           │
+  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐  │
+  │  │ Completion   │ │ CQE Write    │ │ CQ Context Table         │  │
+  │  │ Engine       │─│ Path         │─│ (含 Index Manager)       │  │
+  │  │ (格式化CQE)  │ │ (计算地址+DMA)│ └──────────────────────────┘  │
+  │  └──────────────┘ └──────────────┘                               │
+  │  ┌──────────────────────────────────────────────────────────────┐ │
+  │  │              CQ Notification → MSI-X Interrupt               │ │
+  │  └──────────────────────────────────────────────────────────────┘ │
+  └──────────────────────────────────────────────────────────────────┘
+</pre>
+  </div>
+
+  <h3>数据面端到端流程（以 RDMA Write 为例）</h3>
+  <div class="flow">
+    <span class="flow-box">软件写 WQE</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Doorbell</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">SQ Engine</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">WQE Fetch</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">DMA Dispatcher</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">SGE Traversal</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">MR Check</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Host Read</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Transport</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">CQE Write</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">MSI-X</span>
+  </div>
+
+  <h3>控制面流程</h3>
+  <div class="flow">
+    <span class="flow-box">软件写 BAR2 CSR</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">CSR Mailbox</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Lifecycle Manager</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Context Table</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Done Response</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 3. PACKAGE -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="package">
+  <h2><span class="num">3</span> smartnic_pkg.sv —— 核心数据包</h2>
+
+  <p><code>smartnic_pkg.sv</code> 是整个项目的<strong>唯一共享定义文件</strong>，1389 行，被所有模块通过 <code>import smartnic_pkg::*</code> 引用。它<strong>不包含任何逻辑</strong>，只定义类型和常量。</p>
+
+  <div class="rationale">
+    <div class="rationale-title">💡 为什么把所有类型集中在一个 package 里？</div>
+    <ul>
+      <li><strong>单一事实来源</strong>：RTL、Cocotb 测试、未来 Linux 驱动 UAPI、用户态库全部引用同一套类型定义，消除不一致。</li>
+      <li><strong>编译时类型检查</strong>：SystemVerilog packed struct + enum 确保位宽精确匹配，防止跨模块连线错误。</li>
+      <li><strong>易于演进</strong>：添加新字段只需改一处，所有模块自动获得更新。</li>
+    </ul>
+  </div>
+
+  <h3>3.1 参数常量 (parameter)</h3>
+  <p>定义位宽、容量上限、BAR 布局、寄存器偏移等约 100 个编译期常量。</p>
+  <table class="fn-table">
+    <tr><th>参数</th><th>值</th><th>含义</th></tr>
+    <tr><td><span class="fn-name">ADDR_W</span></td><td>64</td><td>主机虚拟/物理地址位宽</td></tr>
+    <tr><td><span class="fn-name">QP_ID_W / CQ_ID_W / MR_ID_W</span></td><td>24</td><td>资源 ID 位宽，支持 16M 个 QP/CQ/MR</td></tr>
+    <tr><td><span class="fn-name">WQE_BYTES / CQE_BYTES</span></td><td>64</td><td>WQE/CQE 均为 64 字节</td></tr>
+    <tr><td><span class="fn-name">MAX_SGE</span></td><td>256</td><td>单个 WR 最多 256 个 SGE</td></tr>
+    <tr><td><span class="fn-name">QP_TABLE_DEPTH / CQ_TABLE_DEPTH / MR_TABLE_DEPTH</span></td><td>1024</td><td>原型阶段片上表深度</td></tr>
+    <tr><td><span class="fn-name">PCIE_BAR0_ID / PCIE_BAR2_ID / PCIE_BAR4_ID</span></td><td>0 / 2 / 4</td><td>BAR0=Doorbell, BAR2=CSR, BAR4=MSI-X</td></tr>
+    <tr><td><span class="fn-name">SRIOV_MAX_VF</span></td><td>8</td><td>SR-IOV 最大 VF 数量</td></tr>
+    <tr><td><span class="fn-name">PCIE_MSIX_VECTOR_COUNT</span></td><td>8</td><td>MSI-X 中断向量数量</td></tr>
+    <tr><td><span class="fn-name">DMA_MAX_READ_BYTES</span></td><td>32 (256 bit / 8)</td><td>单次 DMA 读分块最大字节数</td></tr>
+  </table>
+
+  <h3>3.2 枚举类型 (enum) —— 状态机与错误码</h3>
+  <p>每个模块定义了<strong>一对</strong>枚举：<code>*_state_e</code>（FSM 状态）和 <code>*_error_e</code>（错误码）。总计 60+ 个枚举类型。</p>
+
+  <table class="fn-table">
+    <tr><th>枚举类</th><th>示例</th><th>用途</th></tr>
+    <tr>
+      <td>RDMA 协议枚举</td>
+      <td><span class="fn-name">rdma_opcode_e</span> (SEND, RDMA_WRITE, RDMA_READ...)<br><span class="fn-name">qp_state_e</span> (RESET→INIT→RTR→RTS→SQD→SQE→ERR)<br><span class="fn-name">cmpl_status_e</span> (SUCCESS, LOC_LEN_ERR, LOC_PROT_ERR...)</td>
+      <td>定义 IBTA/RoCEv2 协议标准状态和操作码</td>
+    </tr>
+    <tr>
+      <td>表操作结果</td>
+      <td><span class="fn-name">qp_table_status_e</span>, <span class="fn-name">cq_table_status_e</span>, <span class="fn-name">mr_table_status_e</span></td>
+      <td>Context Table lookup/write 的统一返回状态</td>
+    </tr>
+    <tr>
+      <td>模块 FSM 状态</td>
+      <td><span class="fn-name">mr_registration_state_e</span> (IDLE→VALIDATE_REQ→...→RESPOND→ERROR)<br><span class="fn-name">dma_mr_integration_state_e</span> (IDLE→ACCEPT→KEY_CHECK→ACCESS_CHECK→PD_CHECK→TRANSLATE→REFCOUNT_INC→EMIT→ERROR)</td>
+      <td>每个模块的有限状态机状态编码</td>
+    </tr>
+    <tr>
+      <td>模块错误码</td>
+      <td><span class="fn-name">mr_registration_error_e</span> (16 bit, 15 种错误)<br><span class="fn-name">dma_mr_error_e</span> (16 bit, 15 种错误)</td>
+      <td>细粒度错误报告，方便驱动定位问题</td>
+    </tr>
+    <tr>
+      <td>接口协议枚举</td>
+      <td><span class="fn-name">doorbell_type_e</span>, <span class="fn-name">dma_opcode_e</span>, <span class="fn-name">pcie_tlp_type_e</span></td>
+      <td>模块间接口信号的类型编码</td>
+    </tr>
+  </table>
+
+  <h3>3.3 Packed Struct —— 硬件数据结构</h3>
+  <p>25+ 个 packed struct，每个都精确指定了总位宽，确保综合器能将其映射为寄存器或 wire 向量。</p>
+
+  <table class="fn-table">
+    <tr><th>Struct</th><th>位宽</th><th>核心字段</th></tr>
+    <tr><td><span class="fn-name">wqe_t</span></td><td>512 bit (64B)</td><td>opcode, flags, sge_count, wr_id, local_va, lkey, length, remote_va, rkey, imm_data</td></tr>
+    <tr><td><span class="fn-name">send_wqe_t</span></td><td>512 bit (64B)</td><td>wqe_t + inline_data + extended_sge_list_addr</td></tr>
+    <tr><td><span class="fn-name">cqe_t</span></td><td>512 bit (64B)</td><td>wr_id, qpn, opcode, status, byte_len, imm_data, solicited, syndrome, flags</td></tr>
+    <tr><td><span class="fn-name">qp_context_t</span></td><td>~500 bit</td><td>valid, qpn, qp_type, state, pd_id, send/recv_cqn, sq/rq_base/depth/producer/consumer, remote_qpn, PSN, retry, pkey/qkey, error_state/error_code</td></tr>
+    <tr><td><span class="fn-name">cq_context_t</span></td><td>~500 bit</td><td>valid, cqn, cq_buffer_base_addr, cq_depth, producer/consumer_index, msix_vector, moderation_*, armed, solicited_only, overflow</td></tr>
+    <tr><td><span class="fn-name">mr_entry_t</span></td><td>~400 bit</td><td>valid, lkey/rkey, virtual/physical_base_addr, length, page_size, access_flags, pd_id, owner_function, refcount, pending_deregister, memory_window, invalidating</td></tr>
+    <tr><td><span class="fn-name">doorbell_t</span></td><td>~100 bit</td><td>db_type, func_id, qpn, cqn, producer_idx, consumer_idx, solicited_only</td></tr>
+    <tr><td><span class="fn-name">dma_desc_t</span></td><td>~800 bit</td><td>desc_valid/id, dma_opcode, qpn, cqn, owner_function, pd_id, wr_id, local/remote_key, local/remote_va, physical_addr, length, sge_count/index, direction, completion_required</td></tr>
+    <tr><td><span class="fn-name">dma_segment_t</span></td><td>~400 bit</td><td>desc_id, qpn, owner_function, pd_id, operation, sge_index, va, len, lkey, rkey, is_remote, byte_offset, is_last</td></tr>
+    <tr><td><span class="fn-name">protected_dma_segment_t</span></td><td>~500 bit</td><td>dma_segment_t + pa, access_flags, refcount_token, error_code</td></tr>
+    <tr><td><span class="fn-name">ah_entry_t</span></td><td>~256 bit</td><td>dst_mac, dst_ipv4, udp_src/dst_port, pkey, qkey, traffic_class</td></tr>
+    <tr><td><span class="fn-name">sriov_resource_window_t</span></td><td>~300 bit</td><td>qp/cq/mr base/limit, doorbell base/limit, msix_vector base/limit</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 4. PCIE -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="pcie">
+  <h2><span class="num">4</span> PCIe 子系统 (5 模块)</h2>
+
+  <p>PCIe 子系统是 SmartNIC 与主机之间的<strong>物理接口层</strong>。它将来自 PCIe 总线的 TLP (Transaction Layer Packet) 请求转换为内部模块可以理解的 BAR 访问。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">🔌 pcie_endpoint_wrapper</div>
+      <div class="card-file">rtl/pcie/pcie_endpoint_wrapper.sv</div>
+      <div class="card-desc">PCIe 硬核 IP 的接口封装层。将特定 FPGA 厂商的 PCIe IP 接口适配为统一的内部 valid-ready 接口，是外部 IP 与内部逻辑的隔离边界。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🗺️ pcie_bar_decoder</div>
+      <div class="card-file">rtl/pcie/pcie_bar_decoder.sv</div>
+      <div class="card-desc">根据 BAR 编号和 offset 将内存读写请求路由到 Doorbell (BAR0)、CSR (BAR2) 或 MSI-X (BAR4) 子路径。含对齐和范围检查。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">⚙️ pcie_cfg_space</div>
+      <div class="card-file">rtl/pcie/pcie_cfg_space.sv</div>
+      <div class="card-desc">PCIe Type 0 配置空间。提供 Vendor ID、Device ID、BAR 属性、Capability 链表 (PM, MSI-X, PCIe, AER, ATS, SR-IOV) 等。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔐 pcie_function_manager</div>
+      <div class="card-file">rtl/pcie/pcie_function_manager.sv</div>
+      <div class="card-desc">SR-IOV PF/VF 身份管理和资源窗口分配。每个 function 有独立的 QP/CQ/MR/Doorbell/MSI-X 资源窗口，实现硬件隔离。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📬 pcie_msix</div>
+      <div class="card-file">rtl/pcie/pcie_msix.sv</div>
+      <div class="card-desc">MSI-X 中断表/PBA 管理和中断调节 (moderation)。支持 8 个 vector，含 per-vector mask、moderation timer/counter。</div>
+    </div>
+  </div>
+
+  <!-- pcie_bar_decoder detail -->
+  <div class="module-detail">
+    <div class="module-name">pcie_bar_decoder</div>
+    <div class="module-path">rtl/pcie/pcie_bar_decoder.sv</div>
+    <p>纯组合逻辑路由 + 一拍寄存响应的 0-cycle 延迟解码器。不使用 FSM，所有输出在同周期确定。</p>
+
+    <h4>端口接口</h4>
+    <table class="fn-table">
+      <tr><th>信号</th><th>方向</th><th>功能</th></tr>
+      <tr><td><span class="fn-type fn-type-input">input</span> bar_req_valid/ready/write/bar/offset/wdata/be/func_id</td><td>输入</td><td>来自 PCIe wrapper 的 BAR 内存访问请求</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> doorbell_req_*</td><td>输出</td><td>路由到 BAR0 Doorbell 的请求</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> csr_req_*</td><td>输出</td><td>路由到 BAR2 CSR 的请求</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> msix_req_*</td><td>输出</td><td>路由到 BAR4 MSI-X 的请求</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> bar_rsp_*</td><td>输出</td><td>解码完成响应（含状态和读数据）</td></tr>
+    </table>
+
+    <h4>内部函数</h4>
+    <table class="fn-table">
+      <tr><th>函数</th><th>类型</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">decode_status()</span></td><td><span class="fn-type fn-type-func">function</span></td><td>根据 BAR 是否支持、offset 是否在范围内、是否 dword 对齐，返回 <code>pcie_bar_rsp_status_e</code> 状态码</td></tr>
+    </table>
+
+    <h4>路由逻辑信号</h4>
+    <table class="fn-table">
+      <tr><th>信号</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">route_doorbell</span></td><td>= (bar_req_bar == PCIE_BAR0_ID)，判断是否命中 BAR0</td></tr>
+      <tr><td><span class="fn-name">route_csr</span></td><td>= (bar_req_bar == PCIE_BAR2_ID)，判断是否命中 BAR2</td></tr>
+      <tr><td><span class="fn-name">route_msix</span></td><td>= (bar_req_bar == PCIE_BAR4_ID)，判断是否命中 BAR4</td></tr>
+      <tr><td><span class="fn-name">msix_in_table / msix_in_pba / msix_in_moderation</span></td><td>BAR4 内部子窗口细分 (Table / PBA / Moderation 寄存器)</td></tr>
+      <tr><td><span class="fn-name">offset_in_range</span></td><td>组合判断 offset 是否在目标 BAR 的合法范围内</td></tr>
+    </table>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么 BAR decoder 不用 FSM？</div>
+      <p>BAR 路由是纯地址解码——输入 offset 和 BAR 编号立刻决定目标。用组合逻辑可以做到 0 周期延迟。唯一的寄存器是 bar_rsp_valid/bar_rsp_rdata，用于给上游返回响应。</p>
+    </div>
+  </div>
+
+  <!-- pcie_function_manager detail -->
+  <div class="module-detail">
+    <div class="module-name">pcie_function_manager</div>
+    <div class="module-path">rtl/pcie/pcie_function_manager.sv</div>
+    <p>管理 SR-IOV 的 PF (Physical Function) 和 VF (Virtual Function) 身份及资源窗口。每个 function 有独立的 <code>sriov_function_identity_t</code> 和 <code>sriov_resource_window_t</code>。</p>
+
+    <h4>核心数据结构</h4>
+    <table class="fn-table">
+      <tr><th>Struct</th><th>内容</th></tr>
+      <tr><td><span class="fn-name">sriov_function_identity_t</span></td><td>is_pf, pf_id, vf_id, function_id, requester_id, enabled, trusted</td></tr>
+      <tr><td><span class="fn-name">sriov_resource_window_t</span></td><td>qp_base/limit, cq_base/limit, mr_base/limit, doorbell_base/limit, msix_vector_base/limit</td></tr>
+    </table>
+
+    <h4>访问检查函数</h4>
+    <table class="fn-table">
+      <tr><th>函数</th><th>类型</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">check_access()</span></td><td><span class="fn-type fn-type-func">function</span></td><td>根据 access_type (BAR0_DOORBELL/BAR2_CSR/BAR4_MSIX/QP/CQ/MR) 和 function_id，检查资源 ID 或 BAR offset 是否在该 function 的窗口内，返回 <code>sriov_access_status_e</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 5. DOORBELL -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="doorbell">
+  <h2><span class="num">5</span> Doorbell 子系统 (5 模块)</h2>
+
+  <p>Doorbell 是软件通知硬件的<strong>快速路径</strong>。用户态程序通过 MMIO 写 BAR0 Doorbell page 来告知硬件：SQ/RQ 有新 WQE，或 CQ 已被软件消费。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">🔔 doorbell_decoder</div>
+      <div class="card-file">rtl/doorbell/doorbell_decoder.sv</div>
+      <div class="card-desc">根据 BAR0 offset 解析 Doorbell 类型 (SQ/RQ/CQ_ARM)，从 page_id 推导 QPN/CQN，提取 queue index。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🛡️ doorbell_access_check</div>
+      <div class="card-file">rtl/doorbell/doorbell_access_check.sv</div>
+      <div class="card-desc">调用 pcie_function_manager 校验 Doorbell 发起者是否有权限访问目标 QP/CQ。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📤 sq_doorbell_handler</div>
+      <div class="card-file">rtl/doorbell/sq_doorbell_handler.sv</div>
+      <div class="card-desc">处理 SQ Doorbell：更新 QP context 中的 sq_producer index，触发 SQ engine 开始处理新 WQE。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📥 rq_doorbell_handler</div>
+      <div class="card-file">rtl/doorbell/rq_doorbell_handler.sv</div>
+      <div class="card-desc">处理 RQ Doorbell：更新 QP context 中的 rq_producer index，使能接收。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔄 cq_arm_doorbell_handler</div>
+      <div class="card-file">rtl/doorbell/cq_arm_doorbell_handler.sv</div>
+      <div class="card-desc">处理 CQ Arm Doorbell：更新 CQ consumer index，重新 arm 中断通知。</div>
+    </div>
+  </div>
+
+  <!-- doorbell_decoder detail -->
+  <div class="module-detail">
+    <div class="module-name">doorbell_decoder</div>
+    <div class="module-path">rtl/doorbell/doorbell_decoder.sv</div>
+    <p>Doorbell 的关键设计是 <strong>Page-based 寻址</strong>：BAR0 被划分为多个 4KB page，每个 page 对应一个 QP 或 CQ。Page 内的 offset 区分 SQ (offset 0)、RQ (offset 8) 和 CQ Arm (offset 16)。</p>
+
+    <h4>内部信号与函数</h4>
+    <table class="fn-table">
+      <tr><th>信号/函数</th><th>类型</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">page_offset</span></td><td>组合逻辑</td><td>= db_req_offset & (DB_PAGE_SIZE - 1)，获取 page 内偏移</td></tr>
+      <tr><td><span class="fn-name">page_id</span></td><td>组合逻辑</td><td>= db_req_offset >> DB_PAGE_SHIFT，推导 QPN 或 CQN</td></tr>
+      <tr><td><span class="fn-name">decoded_type</span></td><td>组合逻辑</td><td>根据 page_offset 匹配 DB_SQ_OFFSET / DB_RQ_OFFSET / DB_CQ_ARM_OFFSET</td></tr>
+      <tr><td><span class="fn-name">decoded_type_valid</span></td><td>组合逻辑</td><td>是否为已知的 Doorbell 类型</td></tr>
+      <tr><td><span class="fn-name">decode_status_next</span></td><td>组合逻辑</td><td>综合 page_in_range、dword_aligned、write_strobe_valid、decoded_type_valid 给出最终状态</td></tr>
+      <tr><td><span class="fn-name">sq_doorbell_payload_t</span></td><td>packed struct</td><td>SQ Doorbell 的 payload 格式：flags + doorbell_sequence + new_sq_producer_index</td></tr>
+      <tr><td><span class="fn-name">rq_doorbell_payload_t</span></td><td>packed struct</td><td>RQ Doorbell 的 payload 格式</td></tr>
+      <tr><td><span class="fn-name">cq_arm_doorbell_payload_t</span></td><td>packed struct</td><td>CQ Arm Doorbell 的 payload 格式</td></tr>
+    </table>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么用 Page-based 寻址？</div>
+      <ul>
+        <li><strong>用户态直接访问</strong>：4KB page 可通过 mmap 映射给用户进程，避免系统调用。</li>
+        <li><strong>硬件解码简单</strong>：page_id 直接就是 QPN/CQN，无需查表。</li>
+        <li><strong>安全隔离</strong>：每个 VF 有独立的 BAR0 window，doorbell_access_check 验证跨 VF 访问。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 6. QP -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="qp">
+  <h2><span class="num">6</span> QP 子系统 (6 模块)</h2>
+
+  <p>QP (Queue Pair) 是 RDMA 通信的<strong>核心对象</strong>。QP 子系统负责 QP 的创建/修改/查询/销毁、状态迁移校验、SQ/RQ 引擎的数据处理，以及 QP 销毁/错误时的清理。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">📋 qp_context_table</div>
+      <div class="card-file">rtl/qp/qp_context_table.sv</div>
+      <div class="card-desc">1024 项的寄存器阵列，存储 qp_context_t。提供 lookup (by QPN)、read、write、SQ/RQ producer index update 接口。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔄 qp_lifecycle_manager</div>
+      <div class="card-file">rtl/qp/qp_lifecycle_manager.sv</div>
+      <div class="card-desc">处理 CREATE_QP / MODIFY_QP / QUERY_QP / DESTROY_QP / QP_TO_ERROR 命令。7 状态 FSM。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">✅ qp_state_validator</div>
+      <div class="card-file">rtl/qp/qp_state_validator.sv</div>
+      <div class="card-desc">纯组合逻辑校验 IBTA 规范的 QP 状态迁移是否合法。检查必需属性是否齐备。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🧹 qp_cleanup_manager</div>
+      <div class="card-file">rtl/qp/qp_cleanup_manager.sv</div>
+      <div class="card-desc">DESTROY_QP / QP_TO_ERROR 的清理流程：阻止新 Doorbell、等待 in-flight 完成、为未消费 WQE 生成 flush completion。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📤 sq_engine</div>
+      <div class="card-file">rtl/qp/sq_engine.sv</div>
+      <div class="card-desc">Send Queue 引擎：收到 Doorbell 后查找 QP、取 WQE、解码 opcode、分发到 DMA/transport。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📥 rq_engine</div>
+      <div class="card-file">rtl/qp/rq_engine.sv</div>
+      <div class="card-desc">Receive Queue 引擎：入站 Send 到达后查找 QP、取 Recv WQE、分发 DMA write。</div>
+    </div>
+  </div>
+
+  <!-- qp_lifecycle_manager detail -->
+  <div class="module-detail">
+    <div class="module-name">qp_lifecycle_manager</div>
+    <div class="module-path">rtl/qp/qp_lifecycle_manager.sv</div>
+
+    <h4>FSM 状态 (7 状态)</h4>
+    <table class="state-table">
+      <tr><th>状态</th><th>说明</th></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_IDLE</span></td><td>等待命令输入</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_LOOKUP</span></td><td>通过 QP context table 查找目标 QPN</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_EXECUTE</span></td><td>根据命令类型执行：CREATE 检查重复/MODIFY 校验状态迁移/QUERY 返回 context/DESTROY 或 TO_ERROR 转到 CLEANUP</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_UPDATE</span></td><td>将新 context 写回 QP table</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_CLEANUP</span></td><td>等待 cleanup manager 完成清理，然后更新 context</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_DONE</span></td><td>命令成功，等待上游接收响应</td></tr>
+      <tr><td><span class="state-name">QP_LC_STATE_ERROR</span></td><td>命令失败，输出错误响应</td></tr>
+    </table>
+
+    <h4>内部函数</h4>
+    <table class="fn-table">
+      <tr><th>函数</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">command_supported(csr_cmd_e)</span></td><td>判断命令 ID 是否为当前支持的 5 种 QP 命令之一</td></tr>
+      <tr><td><span class="fn-name">owner_function_valid(vf_id)</span></td><td>检查 function_id 是否小于 SRIOV_FUNCTION_COUNT</td></tr>
+      <tr><td><span class="fn-name">legal_create_state(qp_state_e)</span></td><td>CREATE_QP 只允许 RESET 或 INIT 状态</td></tr>
+      <tr><td><span class="fn-name">table_status_to_error(qp_table_status_e)</span></td><td>将 QP table 状态码映射为 lifecycle 错误码</td></tr>
+      <tr><td><span class="fn-name">state_validate_to_lifecycle_error()</span></td><td>将状态校验错误码映射为 lifecycle 错误码</td></tr>
+      <tr><td><span class="fn-name">build_create_context(qpn, func, payload)</span></td><td>构造新 QP context：设置 valid=1, owner_func, qpn, 清零 producer/consumer, error_state=0</td></tr>
+      <tr><td><span class="fn-name">apply_modify_mask(current, payload, mask)</span></td><td>根据 32-bit mask 选择性更新 QP context 字段（state/type/PD/CQ/queue_addr/depth/index/PSN/retry/remote_qpn/keys/AH/error）</td></tr>
+      <tr><td><span class="fn-name">build_error_context(current, error_code)</span></td><td>构造 ERR 状态的 context：state=ERR, error_state=1, 设置 error_code</td></tr>
+    </table>
+
+    <h4>子模块实例</h4>
+    <table class="fn-table">
+      <tr><th>实例</th><th>模块</th><th>作用</th></tr>
+      <tr><td><span class="fn-name">state_validator</span></td><td>qp_state_validator</td><td>校验 QP 状态迁移是否合法</td></tr>
+      <tr><td><span class="fn-name">context_table</span></td><td>qp_context_table</td><td>所有 QP context 的存储和访问</td></tr>
+    </table>
+  </div>
+
+  <!-- qp_state_validator detail -->
+  <div class="module-detail">
+    <div class="module-name">qp_state_validator</div>
+    <div class="module-path">rtl/qp/qp_state_validator.sv</div>
+    <p><strong>纯组合逻辑</strong>，无时钟，无复位。实现 IBTA 规范定义的 QP 状态迁移矩阵。</p>
+
+    <h4>状态迁移规则 (IBTA 子集)</h4>
+    <table class="fn-table">
+      <tr><th>当前状态</th><th>允许的目标状态</th></tr>
+      <tr><td>RESET</td><td>RESET, INIT, ERR</td></tr>
+      <tr><td>INIT</td><td>INIT, RTR, ERR</td></tr>
+      <tr><td>RTR</td><td>RTR, RTS, ERR</td></tr>
+      <tr><td>RTS</td><td>RTS, SQD, ERR</td></tr>
+      <tr><td>SQD</td><td>SQD, RTS, SQE, ERR</td></tr>
+      <tr><td>SQE</td><td>ERR</td></tr>
+      <tr><td>ERR</td><td>(终态，不可迁移)</td></tr>
+    </table>
+
+    <h4>接口信号</h4>
+    <table class="fn-table">
+      <tr><th>信号</th><th>功能</th></tr>
+      <tr><td><span class="fn-type fn-type-input">input</span> validate_valid / current_state / requested_state / qp_type / modify_mask</td><td>校验请求和参数</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> validate_allowed</td><td>迁移是否允许</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> validate_error_code</td><td>失败原因 (TRANSITION / MISSING_ATTR / QP_TYPE)</td></tr>
+      <tr><td><span class="fn-type fn-type-output">output</span> required_attr_mask / missing_attr_mask</td><td>目标状态需要的属性和缺失的属性</td></tr>
+    </table>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么把状态校验独立成一个纯组合模块？</div>
+      <ul>
+        <li><strong>可测试性</strong>：纯组合逻辑可以直接用 Cocotb 做穷举测试（7×7=49 组合 + 属性 mask 检查）。</li>
+        <li><strong>可审计性</strong>：状态迁移矩阵集中在一处，便于对照 IBTA 规范审查。</li>
+        <li><strong>复用性</strong>：不仅 lifecycle manager 使用，未来 transport 层收到对端错误时也可调用同一模块来判断是否应迁移到 ERR。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- sq_engine detail -->
+  <div class="module-detail">
+    <div class="module-name">sq_engine</div>
+    <div class="module-path">rtl/qp/sq_engine.sv</div>
+
+    <h4>FSM 状态 (8 状态)</h4>
+    <table class="state-table">
+      <tr><th>状态</th><th>说明</th></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_IDLE</span></td><td>等待 Doorbell/scheduler 输入</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_LOOKUP_QP</span></td><td>读取 QP context</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_CHECK_STATE</span></td><td>检查 QP state 是否允许发送 (RTS/SQD)</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_FETCH_WQE</span></td><td>发起并等待 WQE fetch</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_DECODE_WQE</span></td><td>解码 WQE opcode (SEND/WRITE/READ/NOP...)</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_DISPATCH</span></td><td>分发到 DMA/transport/local invalidate/NOP</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_UPDATE_CI</span></td><td>更新 SQ consumer index</td></tr>
+      <tr><td><span class="state-name">SQ_ENG_STATE_ERROR</span></td><td>输出错误/completion 请求</td></tr>
+    </table>
+
+    <h4>核心功能</h4>
+    <table class="fn-table">
+      <tr><th>功能</th><th>描述</th></tr>
+      <tr><td>Doorbell 消费</td><td>收到 sq_doorbell_handler 输出的 producer update 后，比较 sq_producer 和 sq_consumer 判断是否有新 WQE</td></tr>
+      <tr><td>WQE 地址计算</td><td>WQE_addr = sq_base + (sq_consumer * WQE_BYTES)，WQE 固定 64 字节</td></tr>
+      <tr><td>WQE 解码</td><td>解析 wqe_t 中的 opcode / flags / length / keys / addresses</td></tr>
+      <tr><td>分发决策</td><td>SEND/WRITE → DMA host read；READ → DMA + transport；NOP → 直接推进 consumer index</td></tr>
+      <tr><td>Completion 生成</td><td>signaled WQE 完成后生成 completion event 发往 completion engine</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 7. CQ -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="cq">
+  <h2><span class="num">7</span> CQ 子系统 (5 模块)</h2>
+
+  <p>CQ (Completion Queue) 子系统负责<strong>将操作完成事件通知给软件</strong>。工作流：接收 completion event → 格式化 CQE → 写 CQE 到主机内存 → 触发 MSI-X 中断。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">📋 cq_context_table</div>
+      <div class="card-file">rtl/cq/cq_context_table.sv</div>
+      <div class="card-desc">1024 项寄存器阵列，存储 cq_context_t。提供 lookup、read、write、producer/consumer update 接口。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔢 cq_index_manager</div>
+      <div class="card-file">rtl/cq/cq_index_manager.sv</div>
+      <div class="card-desc">CQ producer/consumer index 计算。采用 reserved-slot 方案判断 CQ full/empty，防止溢出。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📝 completion_engine</div>
+      <div class="card-file">rtl/cq/completion_engine.sv</div>
+      <div class="card-desc">接收 completion event，查找 CQ context，格式化为 64 字节 CQE。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">✍️ cqe_write_path</div>
+      <div class="card-file">rtl/cq/cqe_write_path.sv</div>
+      <div class="card-desc">计算 CQE 写入地址，发起 DMA write，更新 CQ producer index。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔔 cq_notification</div>
+      <div class="card-file">rtl/cq/cq_notification.sv</div>
+      <div class="card-desc">中断通知逻辑：检查 armed/solicited_only、中断调节 (moderation counter/timer)、触发 MSI-X。</div>
+    </div>
+  </div>
+
+  <!-- completion_engine detail -->
+  <div class="module-detail">
+    <div class="module-name">completion_engine</div>
+    <div class="module-path">rtl/cq/completion_engine.sv</div>
+
+    <h4>FSM 状态 (5 状态)</h4>
+    <table class="state-table">
+      <tr><th>状态</th><th>说明</th></tr>
+      <tr><td><span class="state-name">CMPL_ENG_STATE_IDLE</span></td><td>等待 completion event</td></tr>
+      <tr><td><span class="state-name">CMPL_ENG_STATE_LOOKUP_CQ</span></td><td>向 CQ context table 发起 CQN lookup</td></tr>
+      <tr><td><span class="state-name">CMPL_ENG_STATE_WAIT_CQ</span></td><td>等待 CQ lookup 响应</td></tr>
+      <tr><td><span class="state-name">CMPL_ENG_STATE_FORMAT</span></td><td>根据 event 和 lookup 结果格式化 64-byte CQE</td></tr>
+      <tr><td><span class="state-name">CMPL_ENG_STATE_WRITE</span></td><td>向 cqe_write_path 输出 CQE write request</td></tr>
+    </table>
+
+    <h4>关键数据结构</h4>
+    <table class="fn-table">
+      <tr><th>结构</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">completion_event_t</span></td><td>内部 completion event 格式：event_type, qpn, cqn, wr_id, opcode, status, byte_len, imm_data, solicited, source_engine</td></tr>
+      <tr><td><span class="fn-name">cqe_t</span></td><td>64 字节 CQE：wr_id, qpn, opcode, status, byte_len, imm_data, has_imm, solicited, vendor_error, owner_function, cqn, syndrome, flags, timestamp, valid, owner_bit</td></tr>
+    </table>
+
+    <h4>Completion 来源 (completion_source_e)</h4>
+    <table class="fn-table">
+      <tr><th>来源</th><th>说明</th></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_SQ</span></td><td>SQ engine 的 Send/RDMA Write/Read 完成</td></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_RQ</span></td><td>RQ engine 的 Recv 完成</td></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_CLEANUP</span></td><td>QP cleanup manager 的 flush completion</td></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_DMA</span></td><td>DMA engine 报告的错误</td></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_TRANSPORT</span></td><td>RoCEv2 transport 层的完成/错误</td></tr>
+      <tr><td><span class="fn-name">CMPL_SRC_ERROR</span></td><td>其他错误汇聚路径</td></tr>
+    </table>
+  </div>
+
+  <!-- cq_notification detail -->
+  <div class="module-detail">
+    <div class="module-name">cq_notification</div>
+    <div class="module-path">rtl/cq/cq_notification.sv</div>
+
+    <h4>中断调节 (Moderation) 机制</h4>
+    <p>为减少中断频率，支持两种调节策略：</p>
+    <ul>
+      <li><strong>Moderation Count</strong>：每 N 个 completion 触发一次中断</li>
+      <li><strong>Moderation Timer</strong>：定时器到期时，若有 pending completion 则触发中断</li>
+    </ul>
+    <p>两者可以组合使用：count 先到触发中断，timer 兜底保证延迟上界。</p>
+
+    <h4>触发原因 (cq_notification_reason_e)</h4>
+    <table class="fn-table">
+      <tr><th>原因</th><th>说明</th></tr>
+      <tr><td><span class="fn-name">COMPLETION</span></td><td>普通 completion 且 CQ 已 armed</td></tr>
+      <tr><td><span class="fn-name">SOLICITED</span></td><td>solicited completion 且 solicited_only 模式</td></tr>
+      <tr><td><span class="fn-name">MOD_COUNT</span></td><td>moderation count 达到阈值</td></tr>
+      <tr><td><span class="fn-name">MOD_TIMER</span></td><td>moderation timer 到期</td></tr>
+      <tr><td><span class="fn-name">ERROR</span></td><td>错误 completion，立即通知</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 8. MR -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="mr">
+  <h2><span class="num">8</span> MR 子系统 (7 模块)</h2>
+
+  <p>MR (Memory Region) 子系统是 SmartNIC 的<strong>安全核心</strong>。它确保网卡只能访问已注册的内存区域，且操作符合权限。包含注册/注销管理、key 检查、访问权限检查、PD 检查、Memory Window 管理。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">📋 mr_table</div>
+      <div class="card-file">rtl/mr/mr_table.sv</div>
+      <div class="card-desc">1024 项寄存器阵列，存储 mr_entry_t。提供 lookup (by lkey/rkey)、read、write、VA→PA 转换、bounds check、refcount inc/dec。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📝 mr_registration_manager</div>
+      <div class="card-file">rtl/mr/mr_registration_manager.sv</div>
+      <div class="card-desc">处理 REGISTER_MR 命令：校验请求 → 分配表项 → 取 SG entry → 构造 mr_entry → 写入表。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🗑️ mr_deregistration_manager</div>
+      <div class="card-file">rtl/mr/mr_deregistration_manager.sv</div>
+      <div class="card-desc">处理 DEREGISTER_MR：查找 → 标记 pending → 等待 refcount 归零 → 清除表项。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔑 mr_key_checker</div>
+      <div class="card-file">rtl/mr/mr_key_checker.sv</div>
+      <div class="card-desc">检查 lkey/rkey 的方向正确性：本地操作必须用 lkey，远端操作必须用 rkey。调用 mr_table lookup。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔒 mr_access_checker</div>
+      <div class="card-file">rtl/mr/mr_access_checker.sv</div>
+      <div class="card-desc">检查 MR access_flags 是否允许当前 operation：LOCAL_READ/WRITE、REMOTE_READ/WRITE/ATOMIC、MW_BIND。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🛡️ mr_pd_checker</div>
+      <div class="card-file">rtl/mr/mr_pd_checker.sv</div>
+      <div class="card-desc">检查 QP 的 PD 是否与 MR 的 PD 匹配。PD 不匹配则拒绝访问。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🪟 mr_memory_window_manager</div>
+      <div class="card-file">rtl/mr/mr_memory_window_manager.sv</div>
+      <div class="card-desc">管理 Memory Window (MW) 的 bind/unbind/QP error invalidation。</div>
+    </div>
+  </div>
+
+  <!-- mr_table detail -->
+  <div class="module-detail">
+    <div class="module-name">mr_table</div>
+    <div class="module-path">rtl/mr/mr_table.sv</div>
+    <p>MR 表是 <strong>整个数据通路中访问最频繁的表</strong>。每个 DMA segment 都需要经过 MR 表做 key lookup + bounds check + VA→PA 翻译 + refcount 操作。</p>
+
+    <h4>接口功能</h4>
+    <table class="fn-table">
+      <tr><th>接口</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">lookup</span></td><td>按 lkey 或 rkey 搜索全表（组合逻辑遍历），返回 MR entry 和命中状态</td></tr>
+      <tr><td><span class="fn-name">read / write</span></td><td>按 MR ID 或 QPN 读写表项</td></tr>
+      <tr><td><span class="fn-name">check</span></td><td><strong>核心接口</strong>：key lookup + VA bounds check + VA→PA 翻译一站式操作。输入 key/va/len/is_remote，输出 entry/pa/status</td></tr>
+      <tr><td><span class="fn-name">refcount_inc / refcount_dec</span></td><td>原子增减引用计数。ref_inc 在 DMA read 发起前，ref_dec 在 DMA 完成后</td></tr>
+    </table>
+
+    <h4>错误状态码 (mr_table_status_e, 11 种)</h4>
+    <table class="fn-table">
+      <tr><th>状态</th><th>说明</th></tr>
+      <tr><td><span class="fn-name">OK</span></td><td>成功</td></tr>
+      <tr><td><span class="fn-name">MISS</span></td><td>key lookup 未命中</td></tr>
+      <tr><td><span class="fn-name">PERMISSION</span></td><td>owner_function 不匹配</td></tr>
+      <tr><td><span class="fn-name">ALIAS</span></td><td>同一 key 命中多个表项</td></tr>
+      <tr><td><span class="fn-name">FULL</span></td><td>无空闲表项</td></tr>
+      <tr><td><span class="fn-name">BOUNDS</span></td><td>VA + len 超出 MR 范围</td></tr>
+      <tr><td><span class="fn-name">LENGTH</span></td><td>len 为 0 或非法</td></tr>
+      <tr><td><span class="fn-name">REF_OVER / REF_UNDER</span></td><td>refcount 溢出/下溢</td></tr>
+      <tr><td><span class="fn-name">PENDING</span></td><td>MR 正在注销中</td></tr>
+    </table>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么 MR 表需要引用计数 (refcount)？</div>
+      <p>当一个 MR 正在被 DMA 读取时，如果软件同时发起 DEREGISTER_MR，硬件不能立即删除 MR entry——否则正在进行的 DMA 会访问到无效的物理地址。引用计数确保：</p>
+      <ul>
+        <li>每次 DMA 发起前 refcount +1</li>
+        <li>每次 DMA 完成后 refcount -1</li>
+        <li>DEREGISTER_MR 标记 pending_deregister=1，然后等待 refcount 归零后才真正清除表项</li>
+        <li>refcount 归零超时（MR_DEREG_TIMEOUT_CYCLES=1024 周期）会报错，防止死锁</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- MR Protection Pipeline -->
+  <div class="module-detail">
+    <div class="module-name">MR 保护管线 (dma_mr_integration 中串联)</div>
+    <div class="module-path">rtl/dma/dma_mr_integration.sv</div>
+    <p>DMA 数据通路中的 MR 保护是一个<strong>多级串联管线</strong>，每级独立可测试：</p>
+
+    <div class="flow">
+      <span class="flow-box">dma_segment</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">ACCEPT (锁存)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">KEY_CHECK (mr_key_checker)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">ACCESS_CHECK (mr_access_checker)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">PD_CHECK (mr_pd_checker)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">TRANSLATE (VA→PA)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">REFCOUNT_INC (+1)</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-box">EMIT (protected_segment)</span>
+    </div>
+
+    <p>每级失败都会产生细粒度的 <code>dma_mr_error_e</code> 错误码（15 种），方便驱动定位问题根因。</p>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么保护管线分这么多级，而不是合并成一个模块？</div>
+      <ul>
+        <li><strong>单一职责</strong>：key_check 只管 key 方向，access_check 只管权限位，pd_check 只管 PD 匹配。各自独立，修改一处不影响其他。</li>
+        <li><strong>独立测试</strong>：每个 checker 可以单独用 Cocotb 穷举测试所有正常和错误路径。</li>
+        <li><strong>流水线并行</strong>：在 ASIC 实现中，每级可以独立作为 pipeline stage，提高吞吐。</li>
+        <li><strong>错误归因精确</strong>：driver 可以根据 error code 立刻知道是 key 错误、权限错误还是 PD 错误，而不是一个笼统的 "MR error"。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- mr_registration_manager detail -->
+  <div class="module-detail">
+    <div class="module-name">mr_registration_manager</div>
+    <div class="module-path">rtl/mr/mr_registration_manager.sv</div>
+
+    <h4>FSM 状态 (9 状态)</h4>
+    <table class="state-table">
+      <tr><td><span class="state-name">IDLE</span> → <span class="state-name">VALIDATE_REQ</span> → <span class="state-name">ALLOC_ENTRY</span> → <span class="state-name">FETCH_SG</span> → <span class="state-name">VALIDATE_SG</span> → <span class="state-name">BUILD_ENTRY</span> → <span class="state-name">WRITE_TABLE</span> → <span class="state-name">RESPOND</span> / <span class="state-name">ERROR</span></td></tr>
+    </table>
+
+    <h4>错误码 (15 种)</h4>
+    <p>从 <code>LENGTH</code>、<code>PAGE_SIZE</code>、<code>VA_ALIGN</code>、<code>PA_ALIGN</code>、<code>PA_OVERFLOW</code> 到 <code>SG_FETCH</code>、<code>TABLE_WRITE</code> 等，覆盖注册流程中所有可能的失败点。</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 9. DMA -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="dma">
+  <h2><span class="num">9</span> DMA 子系统 (5 模块)</h2>
+
+  <p>DMA 子系统是 SmartNIC 的<strong>数据搬运引擎</strong>。它负责从主机内存读取 WQE、SGE list、payload，以及将 CQE 和接收数据写回主机内存。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">🚦 dma_descriptor_dispatcher</div>
+      <div class="card-file">rtl/dma/dma_descriptor_dispatcher.sv</div>
+      <div class="card-desc">多路输入仲裁 + opcode 路由。5 个输入源 (SQ/RQ/CQE/WQE fetch/SGE fetch) → 4 个输出路径 (host read / host write / CQE write / fetch)。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📥 dma_wqe_sge_fetcher</div>
+      <div class="card-file">rtl/dma/dma_wqe_sge_fetcher.sv</div>
+      <div class="card-desc">从主机内存读取 WQE 和 SGE list。WQE fetch: 计算地址 → 发起 PCIe read → 解码。SGE fetch: 逐条取 SGE entry。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔗 dma_sge_traversal</div>
+      <div class="card-file">rtl/dma/dma_sge_traversal.sv</div>
+      <div class="card-desc">SGE 流规范化：检查 index 单调递增、检测重叠、累计总长度、与 expected_total_len 比较，输出 dma_segment_t。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🛡️ dma_mr_integration</div>
+      <div class="card-file">rtl/dma/dma_mr_integration.sv</div>
+      <div class="card-desc">MR 保护管线 (key→access→pd→translate→ref_inc)，将 dma_segment_t 转换为 protected_dma_segment_t。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📖 dma_host_read_path</div>
+      <div class="card-file">rtl/dma/dma_host_read_path.sv</div>
+      <div class="card-desc">分块从主机内存读取 payload：按 DMA_MAX_READ_BYTES 拆分为多个 chunk，逐个发起 PCIe read，输出 payload stream。</div>
+    </div>
+  </div>
+
+  <!-- dma_descriptor_dispatcher detail -->
+  <div class="module-detail">
+    <div class="module-name">dma_descriptor_dispatcher</div>
+    <div class="module-path">rtl/dma/dma_descriptor_dispatcher.sv</div>
+
+    <h4>输入源优先级 (固定优先级仲裁)</h4>
+    <table class="fn-table">
+      <tr><th>优先级</th><th>来源</th><th>说明</th></tr>
+      <tr><td>最高</td><td><span class="fn-name">CQE</span></td><td>CQE 写入不能延迟，否则软件看不到 completion</td></tr>
+      <tr><td></td><td><span class="fn-name">RQ</span></td><td>入站数据需要及时写入 Recv buffer</td></tr>
+      <tr><td></td><td><span class="fn-name">SQ</span></td><td>发送路径的数据搬运</td></tr>
+      <tr><td></td><td><span class="fn-name">WQE_FETCH</span></td><td>WQE 读取</td></tr>
+      <tr><td>最低</td><td><span class="fn-name">SGE_FETCH</span></td><td>扩展 SGE list 读取</td></tr>
+    </table>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么用固定优先级而不是 Round-Robin？</div>
+      <p>原型阶段优先保证正确性。CQE 写入和 RQ 写入如果被阻塞会导致软件超时或丢包。后续阶段可升级为 deficit round-robin (DRR) 实现公平性和 QoS。</p>
+    </div>
+
+    <h4>FSM 状态 (7 状态)</h4>
+    <table class="state-table">
+      <tr><td><span class="state-name">IDLE</span> → <span class="state-name">SELECT_INPUT</span> → <span class="state-name">VALIDATE</span> → <span class="state-name">ROUTE</span> → <span class="state-name">WAIT_READY</span> → <span class="state-name">DONE</span> / <span class="state-name">ERROR</span></td></tr>
+    </table>
+
+    <h4>opcode → 路由映射</h4>
+    <table class="fn-table">
+      <tr><th>DMA Opcode</th><th>输出路径</th></tr>
+      <tr><td><span class="fn-name">DMA_OP_SEND / DMA_OP_RDMA_WRITE</span></td><td>ROUTE_HOST_READ</td></tr>
+      <tr><td><span class="fn-name">DMA_OP_RECV / DMA_OP_RDMA_READ_RESP</span></td><td>ROUTE_HOST_WRITE</td></tr>
+      <tr><td><span class="fn-name">DMA_OP_CQE_WRITE</span></td><td>ROUTE_CQE_WRITE</td></tr>
+      <tr><td><span class="fn-name">DMA_OP_WQE_FETCH / DMA_OP_SGE_FETCH</span></td><td>ROUTE_FETCH</td></tr>
+      <tr><td><span class="fn-name">DMA_OP_RDMA_READ_REQ</span></td><td>ROUTE_NONE (预留 transport)</td></tr>
+      <tr><td><span class="fn-name">DMA_OP_NOP</span></td><td>ROUTE_NONE</td></tr>
+    </table>
+  </div>
+
+  <!-- dma_sge_traversal detail -->
+  <div class="module-detail">
+    <div class="module-name">dma_sge_traversal</div>
+    <div class="module-path">rtl/dma/dma_sge_traversal.sv</div>
+    <p>SGE Traversal 是将 SGE list 转换为规范化的 DMA segment 流的关键模块。它检查：</p>
+    <ul>
+      <li><strong>Index 单调性</strong>：SGE index 必须严格递增，不允许重复或乱序</li>
+      <li><strong>重叠检测</strong>：SGE 的 VA 范围不能与之前的 SGE 重叠</li>
+      <li><strong>长度累加</strong>：累计所有 SGE 的 length，检查是否等于 expected_total_len</li>
+      <li><strong>溢出检测</strong>：VA + length 是否溢出，总长度是否 32-bit 溢出</li>
+      <li><strong>Zero-length SGE</strong>：长度为零的 SGE 是否合法（当前阶段拒绝）</li>
+    </ul>
+
+    <h4>FSM 状态 (11 状态)</h4>
+    <table class="state-table">
+      <tr><td><span class="state-name">IDLE</span> → <span class="state-name">ACCEPT_SGE</span> → <span class="state-name">CHECK_ZERO_LEN</span> → <span class="state-name">CHECK_ADDR</span> → <span class="state-name">CHECK_INDEX</span> → <span class="state-name">CHECK_OVERLAP</span> → <span class="state-name">EMIT_SEGMENT</span> → <span class="state-name">UPDATE_ACCOUNT</span> → <span class="state-name">CHECK_TOTAL</span> → <span class="state-name">DONE</span> / <span class="state-name">ERROR</span></td></tr>
+    </table>
+  </div>
+
+  <!-- dma_host_read_path detail -->
+  <div class="module-detail">
+    <div class="module-name">dma_host_read_path</div>
+    <div class="module-path">rtl/dma/dma_host_read_path.sv</div>
+
+    <h4>分块读取策略</h4>
+    <p>对于超过 <code>DMA_MAX_READ_BYTES</code> (32 字节) 的 segment，自动拆分为多个 PCIe read chunk。每个 chunk 携带 <code>dma_read_tag_t</code> (desc_id + segment_index + chunk_index) 用于匹配响应。</p>
+
+    <h4>FSM 状态 (9 状态)</h4>
+    <table class="state-table">
+      <tr><td><span class="state-name">IDLE</span> → <span class="state-name">ACCEPT_SEGMENT</span> → <span class="state-name">VALIDATE</span> → <span class="state-name">ISSUE_READ_REQ</span> → <span class="state-name">WAIT_READ_RESP</span> → <span class="state-name">EMIT_PAYLOAD</span> → <span class="state-name">RELEASE_REF</span> → <span class="state-name">DONE</span> / <span class="state-name">ERROR</span></td></tr>
+    </table>
+
+    <h4>输出格式</h4>
+    <p><code>dma_payload_stream_t</code>：每拍输出一拍 payload 数据，含 desc_id、qpn、operation、data、len、byte_offset、segment_index、segment_last、wqe_last。</p>
+
+    <div class="rationale">
+      <div class="rationale-title">💡 为什么需要 RELEASE_REF 状态？</div>
+      <p>DMA 从 MR 读取数据完成后，必须释放之前 MR integration 阶段增加的 refcount。如果忘记释放，MR 永远无法 deregister，造成资源泄漏。将 refcount release 作为独立 FSM 状态确保了：</p>
+      <ul>
+        <li>即使 payload emit 成功，也不会跳过 refcount release</li>
+        <li>即使 payload emit 失败（下游 backpressure），也会在错误路径中释放 refcount</li>
+        <li>ref_token 在 protected_segment 中携带，传递完整上下文</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 10. CSR -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="csr">
+  <h2><span class="num">10</span> CSR Mailbox 子系统 (1 模块)</h2>
+
+  <div class="module-detail">
+    <div class="module-name">pcie_csr_mailbox</div>
+    <div class="module-path">rtl/reg/pcie_csr_mailbox.sv</div>
+    <p>CSR Mailbox 是<strong>控制面的统一入口</strong>。软件通过 BAR2 MMIO 写入 mailbox 寄存器来提交命令（创建 QP、注册 MR 等），硬件通过 FSM 处理并返回响应。</p>
+
+    <h4>Mailbox 寄存器布局 (BAR2 offset 0x100 ~ 0x1FF)</h4>
+    <table class="fn-table">
+      <tr><th>Offset</th><th>寄存器</th><th>说明</th></tr>
+      <tr><td>0x100</td><td><span class="fn-name">COMMAND_ID</span></td><td>命令操作码 (csr_cmd_e: 20+ 种命令)</td></tr>
+      <tr><td>0x104</td><td><span class="fn-name">OWNER_FUNCTION</span></td><td>命令发起者 function ID</td></tr>
+      <tr><td>0x108</td><td><span class="fn-name">CONTROL</span></td><td>go/done/busy/error 控制位</td></tr>
+      <tr><td>0x10c</td><td><span class="fn-name">STATUS</span></td><td>命令状态 (IDLE/BUSY/SUCCESS/FAILED)</td></tr>
+      <tr><td>0x110</td><td><span class="fn-name">ERROR_CODE</span></td><td>错误码 (csr_mailbox_error_e)</td></tr>
+      <tr><td>0x114</td><td><span class="fn-name">TIMEOUT_COUNTER</span></td><td>超时计数</td></tr>
+      <tr><td>0x120-0x12c</td><td><span class="fn-name">ARG0 ~ ARG3</span></td><td>4 个 32-bit 参数寄存器</td></tr>
+    </table>
+
+    <h4>FSM 状态 (5 状态)</h4>
+    <table class="state-table">
+      <tr><td><span class="state-name">IDLE</span> → <span class="state-name">GO</span> → <span class="state-name">BUSY</span> → <span class="state-name">DONE</span> / <span class="state-name">ERROR</span></td></tr>
+    </table>
+
+    <h4>支持的命令 (csr_cmd_e, 20+ 种)</h4>
+    <table class="fn-table">
+      <tr><th>类别</th><th>命令</th></tr>
+      <tr><td>设备</td><td><span class="fn-name">QUERY_DEVICE</span> — 查询设备能力</td></tr>
+      <tr><td>PD</td><td><span class="fn-name">ALLOC_PD</span>, <span class="fn-name">DEALLOC_PD</span></td></tr>
+      <tr><td>CQ</td><td><span class="fn-name">CREATE_CQ</span>, <span class="fn-name">DESTROY_CQ</span>, <span class="fn-name">QUERY_CQ</span></td></tr>
+      <tr><td>QP</td><td><span class="fn-name">CREATE_QP</span>, <span class="fn-name">MODIFY_QP</span>, <span class="fn-name">QUERY_QP</span>, <span class="fn-name">DESTROY_QP</span>, <span class="fn-name">QP_TO_ERROR</span></td></tr>
+      <tr><td>MR</td><td><span class="fn-name">REG_MR</span>, <span class="fn-name">DEREG_MR</span>, <span class="fn-name">BIND_MW</span>, <span class="fn-name">INVALIDATE_MW</span></td></tr>
+      <tr><td>AH</td><td><span class="fn-name">CREATE_AH</span>, <span class="fn-name">DESTROY_AH</span></td></tr>
+      <tr><td>配置</td><td><span class="fn-name">CONFIG_MSIX</span>, <span class="fn-name">CONFIG_VF</span>, <span class="fn-name">CONFIG_DCQCN</span>, <span class="fn-name">READ_STATS</span></td></tr>
+    </table>
+
+    <h4>内部信号与函数</h4>
+    <table class="fn-table">
+      <tr><th>信号/函数</th><th>类型</th><th>功能</th></tr>
+      <tr><td><span class="fn-name">csr_cmd_hdr_t</span></td><td>packed struct</td><td>Mailbox 命令头：cmd_id + func_id + seq + arg_len + status</td></tr>
+      <tr><td><span class="fn-name">command_supported()</span></td><td>function</td><td>判断 cmd_id 是否为当前阶段支持的命令</td></tr>
+      <tr><td><span class="fn-name">dispatch_command()</span></td><td>内部逻辑</td><td>根据 cmd_id 将命令分发到对应的 manager (QP lifecycle / MR registration / CQ 等)</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 11. DESIGN -->
+<!-- ═══════════════════════════════════════════ -->
+<section id="design">
+  <h2><span class="num">11</span> 整体设计思想与原则</h2>
+
+  <h3>11.1 Valid-Ready 握手 —— 全模块统一接口</h3>
+  <p>所有模块间的数据交换都使用标准的 <code>valid</code> / <code>ready</code> 握手协议：</p>
+  <ul>
+    <li><strong>生产者</strong> 拉高 <code>valid</code> 表示数据有效</li>
+    <li><strong>消费者</strong> 拉高 <code>ready</code> 表示可以接收</li>
+    <li><strong>valid && ready</strong> 同时为高时，数据传输发生（一拍握手）</li>
+    <li>这种协议天然支持<strong>反压</strong>（backpressure）：消费者不 ready 时生产者必须保持 valid 和数据不变</li>
+  </ul>
+
+  <div class="rationale">
+    <div class="rationale-title">💡 为什么全部使用 valid-ready 而不是 AXI-Stream？</div>
+    <ul>
+      <li>valid-ready 是最小化的流控协议，不需要 AXI-Stream 的 tlast/tkeep/tid/tdest 等附加信号。</li>
+      <li>每个模块的接口信号在 packed struct 中已定义好，valid-ready 只是传输控制。</li>
+      <li>后续如果需要升级到 AXI-Stream，只需加 thin wrapper 把 valid/ready 映射到 tvalid/tready。</li>
+    </ul>
+  </div>
+
+  <h3>11.2 每模块一个 FSM —— 可测试性原则</h3>
+  <p>每个模块都实现为独立的有限状态机（FSM），包含：</p>
+  <ul>
+    <li><strong>状态枚举</strong>：<code>*_state_e</code>，定义在 smartnic_pkg.sv 中</li>
+    <li><strong>状态寄存器</strong>：<code>state_reg</code></li>
+    <li><strong>always_ff 块</strong>：时钟上升沿更新状态</li>
+    <li><strong>always_comb 块</strong>：组合逻辑计算下一个状态和输出</li>
+    <li><strong>错误枚举</strong>：<code>*_error_e</code>，每种失败原因都有独立编码</li>
+  </ul>
+
+  <h3>11.3 单一 Package 文件 —— 类型集中管理</h3>
+  <p><code>smartnic_pkg.sv</code> 是整个项目的类型定义中心：</p>
+  <ul>
+    <li>所有 bit-width parameter 集中定义，方便统一调整</li>
+    <li>所有 packed struct 精确指定位宽，防止综合器推断出不期望的位宽</li>
+    <li>所有 enum 定义在同一文件，RTL 和 Python testbench 都用同一套常量</li>
+    <li>Package 不包含任何可综合逻辑，只包含 <code>parameter</code>、<code>typedef</code>、<code>localparam</code></li>
+  </ul>
+
+  <h3>11.4 控制面与数据面分离</h3>
+  <table class="fn-table">
+    <tr><th>层面</th><th>入口</th><th>速率</th><th>模块</th></tr>
+    <tr><td>控制面</td><td>BAR2 CSR Mailbox</td><td>低（管理操作）</td><td>csr_mailbox → lifecycle_manager / registration_manager → context tables</td></tr>
+    <tr><td>数据面</td><td>BAR0 Doorbell</td><td>高（每包触发）</td><td>doorbell_decoder → sq_engine/rq_engine → DMA → completion</td></tr>
+  </table>
+  <p>两条路径共享 context tables (QP/CQ/MR)，但通过 <strong>SR-IOV resource window</strong> 和 <strong>owner_function</strong> 字段确保隔离。</p>
+
+  <h3>11.5 原型优先，正确性优先</h3>
+  <ul>
+    <li><strong>寄存器阵列而非 CAM</strong>：1024 项的 context table 用寄存器 + 组合逻辑遍历实现，适合 FPGA 原型，ASIC 可替换为 CAM/TCAM</li>
+    <li><strong>固定优先级仲裁</strong>：DMA dispatcher 用固定优先级而非 DRR，先保证正确性</li>
+    <li><strong>分块 DMA</strong>：单次 PCIe read 最大 32 字节（DMA_MAX_READ_BYTES），简化 PCIe IP 接口要求</li>
+    <li><strong>超时保护</strong>：所有等待状态都有超时计数器（deregister 等 refcount、cleanup 等 in-flight、traversal 等 last SGE）</li>
+  </ul>
+
+  <h3>11.6 细粒度错误报告 —— 可调试性</h3>
+  <p>每个模块都定义了 10-16 种独立的错误码（16-bit wide），使得：</p>
+  <ul>
+    <li>驱动可以精确知道失败原因并打印有意义的错误信息</li>
+    <li>仿真测试可以注入特定错误条件并验证对应错误码</li>
+    <li>硬件调试时，错误码可以快速定位 bug</li>
+  </ul>
+
+  <h3>11.7 模块级测试驱动</h3>
+  <p>Cocotb Makefile 为每个模块定义了独立的测试目标：</p>
+  <div class="code-block">
+<span class="cm"># sim/cocotb/Makefile 中的典型测试目标</span>
+<span class="kw">test-pcie-cfg</span>:         <span class="cm">// pcie_cfg_space 单元测试</span>
+<span class="kw">test-doorbell-decoder</span>:  <span class="cm">// doorbell_decoder 单元测试</span>
+<span class="kw">test-qp-lifecycle</span>:      <span class="cm">// qp_lifecycle_manager 单元测试</span>
+<span class="kw">test-mr-registration</span>:   <span class="cm">// mr_registration_manager 单元测试</span>
+<span class="kw">test-dma-host-read-path</span>:<span class="cm">// dma_host_read_path 单元测试</span>
+  </div>
+
+  <h3>11.8 完整的数据结构层次</h3>
+  <div class="diagram">
+<pre>
+smartnic_pkg.sv (类型定义根)
+  ├── parameter (位宽、容量、BAR布局) ── 编译期常量
+  ├── enum (状态、错误码、协议编码) ── FSM 状态 + 错误报告
+  │     ├── rdma_opcode_e, qp_state_e, cmpl_status_e  ── 协议层
+  │     ├── *state_e                                     ── 模块 FSM 状态
+  │     └── *error_e                                     ── 模块错误码
+  └── struct packed (硬件数据结构) ── 寄存器映射
+        ├── wqe_t / cqe_t (64B)                           ── 软件-硬件接口
+        ├── qp_context_t / cq_context_t / mr_entry_t     ── 片上表项
+        ├── dma_desc_t / dma_segment_t / protected_dma_segment_t ── DMA 流
+        └── doorbell_t / completion_event_t / sq_dispatch_req_t ── 内部事件
+</pre>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- FOOTER -->
+<!-- ═══════════════════════════════════════════ -->
+<footer>
+  <p>RDMA SmartNIC Architecture Document · Generated 2026-06-16</p>
+  <p>Built with SystemVerilog RTL · Verified with Cocotb + Verilator</p>
+  <p>smartnic-wangs — 教学型 RoCEv2 SmartNIC 硬件设计项目</p>
+</footer>
+
+</div>
+</body>
+</html>

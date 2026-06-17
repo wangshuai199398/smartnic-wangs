@@ -1,68 +1,68 @@
-## 1. Project Structure and Shared Definitions
+## 1. 项目结构与共享定义
 
-- [x] 1.1 Create RTL directory structure for `pcie`, `reg`, `dma`, `qp`, `cq`, `mr`, `packet`, `transport`, `congestion`, `virt`, `completion`, `common`, and `top`.
-- [x] 1.2 Create Linux driver directory structure with files for PCIe core, CSR mailbox, character device, mmap, resources, interrupts, SR-IOV, sysfs/debugfs, and RDMA-facing operations.
-- [x] 1.3 Create userspace library directory structure for device/context, PD, CQ, QP, MR, AH, work request posting, CQ polling, Doorbell helpers, and provider metadata.
-- [x] 1.4 Create Cocotb/Verilator verification directory structure for BFMs, host memory model, scoreboard, unit tests, integration tests, compliance tests, compatibility tests, coverage, and regression scripts.
-- [x] 1.5 Define shared constants and packed formats for WQE, CQE, QP context, CQ context, MR entry, AH entry, CSR commands, Doorbell payloads, opcodes, and completion statuses.
-- [x] 1.6 Add top-level build targets for RTL lint, Verilator simulation, Cocotb tests, driver build, userspace library build, regression, and coverage reporting.
+- [x] 1.1 创建 RTL 目录结构，包含 `pcie`、`reg`、`dma`、`qp`、`cq`、`mr`、`packet`、`transport`、`congestion`、`virt`、`completion`、`common` 和 `top`。
+- [x] 1.2 创建 Linux 驱动目录结构，包含 PCIe 核心、CSR mailbox、字符设备、mmap、资源管理、中断、SR-IOV、sysfs/debugfs 以及 RDMA 操作接口等文件。
+- [x] 1.3 创建用户态库目录结构，包含设备/上下文、PD、CQ、QP、MR、AH、工作请求提交、CQ 轮询、Doorbell 辅助函数以及 provider 元数据。
+- [x] 1.4 创建 Cocotb/Verilator 验证目录结构，包含 BFM、主机内存模型、scoreboard、单元测试、集成测试、协议一致性测试、兼容性测试、覆盖率统计以及回归脚本。
+- [x] 1.5 定义 WQE、CQE、QP context、CQ context、MR entry、AH entry、CSR 命令、Doorbell payload、操作码以及完成状态的共享常量和 packed 格式。
+- [x] 1.6 添加顶层构建目标，包括 RTL lint、Verilator 仿真、Cocotb 测试、驱动构建、用户态库构建、回归测试以及覆盖率报告。
 
-## 2. PCIe Endpoint and Register Control Plane
+## 2. PCIe Endpoint 与寄存器控制面
 
-- [x] 2.1 Implement PCIe endpoint wrapper interfaces for configuration, inbound TLP, outbound TLP, DMA request/completion, MSI-X, and function identity.
-- [x] 2.2 Implement PCIe configuration space with Type 0 header and required PCIe/MSI-X/SR-IOV/AER/ATS capability structures.
-- [x] 2.3 Implement BAR decoder for BAR0 Doorbell aperture, BAR2 CSR space, and BAR4 MSI-X table/PBA space.
-- [x] 2.4 Implement CSR mailbox command protocol with command ID, arguments, GO/DONE, status, error code, timeout, and owner function fields.
-- [x] 2.5 Implement MSI-X table, pending-bit array, vector masking, interrupt arbitration, and outbound MSI-X transaction generation.
-- [x] 2.6 Implement SR-IOV function identity plumbing and per-function access checks for CSR and Doorbell paths.
-- [x] 2.7 Add PCIe endpoint unit tests for configuration reads, BAR routing, CSR command lifecycle, MSI-X masking, and VF access rejection.
+- [x] 2.1 实现 PCIe endpoint wrapper 接口，涵盖配置空间、入站 TLP、出站 TLP、DMA 请求/完成、MSI-X 以及 function 身份标识。
+- [x] 2.2 实现 PCIe 配置空间，包含 Type 0 头以及所需的 PCIe/MSI-X/SR-IOV/AER/ATS capability 结构。
+- [x] 2.3 实现 BAR 解码器，将 BAR0 Doorbell aperture、BAR2 CSR 空间和 BAR4 MSI-X table/PBA 空间进行路由。
+- [x] 2.4 实现 CSR mailbox 命令协议，包含命令 ID、参数、GO/DONE、状态、错误码、超时以及 owner function 等字段。
+- [x] 2.5 实现 MSI-X 表、pending-bit 数组、向量屏蔽、中断仲裁以及出站 MSI-X 事务生成。
+- [x] 2.6 实现 SR-IOV function 身份标识机制以及 CSR 和 Doorbell 路径的逐 function 访问检查。
+- [x] 2.7 添加 PCIe endpoint 单元测试，覆盖配置空间读取、BAR 路由、CSR 命令生命周期、MSI-X 屏蔽以及 VF 访问拒绝。
 
-## 3. Doorbell and Queue Submission Path
+## 3. Doorbell 与队列提交路径
 
-- [x] 3.1 Implement Doorbell address decoder that maps BAR0 offsets to QP SQ, QP RQ, and CQ arm operations.
-- [x] 3.2 Implement per-function Doorbell aperture checks for PF and VF ownership.
-- [x] 3.3 Implement SQ Doorbell payload parsing and QP producer index update.
-- [x] 3.4 Implement RQ Doorbell payload parsing and QP producer index update.
-- [x] 3.5 Implement CQ arm Doorbell parsing with consumer index and solicited-only flag.
-- [x] 3.6 Add Doorbell unit tests for SQ, RQ, CQ arm, producer wraparound, invalid QPN, and cross-VF rejection.
+- [x] 3.1 实现 Doorbell 地址解码器，将 BAR0 偏移映射为 QP SQ、QP RQ 和 CQ arm 操作。
+- [x] 3.2 实现逐 function 的 Doorbell aperture 检查，区分 PF 和 VF 所有权。
+- [x] 3.3 实现 SQ Doorbell payload 解析以及 QP producer index 更新。
+- [x] 3.4 实现 RQ Doorbell payload 解析以及 QP producer index 更新。
+- [x] 3.5 实现 CQ arm Doorbell 解析，含 consumer index 和 solicited-only 标志位。
+- [x] 3.6 添加 Doorbell 单元测试，覆盖 SQ、RQ、CQ arm、producer 回绕、非法 QPN 以及跨 VF 拒绝访问。
 
-## 4. QP Manager
+## 4. QP 管理器
 
-- [x] 4.1 Implement QP context table with QPN tag matching, QP type, state, PD, CQs, queue base addresses, depths, producer/consumer indices, PSN state, retry state, and owner function.
-- [x] 4.2 Implement QP lifecycle commands for create, modify, query, destroy, and error transition.
-- [x] 4.3 Implement IBTA-compatible QP state transition validation for RESET, INIT, RTR, RTS, SQD, SQE, and ERR states.
-- [x] 4.4 Implement SQ engine that fetches WQEs, validates QP state, decodes work request opcode, and dispatches to DMA or transport logic.
-- [x] 4.5 Implement RQ engine that consumes Recv WQEs for inbound Send payloads and dispatches writes to DMA.
-- [x] 4.6 Implement QP destruction and error cleanup with pending work quiesce and flushed completions.
-- [x] 4.7 Add QP tests for lifecycle, legal/illegal state transitions, SQ processing, RQ processing, error transition, and QPN alias prevention.
+- [x] 4.1 实现 QP context 表，包含 QPN tag 匹配、QP 类型、状态、PD、CQ、队列基地址、深度、producer/consumer 索引、PSN 状态、重试状态以及 owner function。
+- [x] 4.2 实现 QP 生命周期命令：创建、修改、查询、销毁以及错误迁移。
+- [x] 4.3 实现 IBTA 兼容的 QP 状态迁移校验，覆盖 RESET、INIT、RTR、RTS、SQD、SQE 和 ERR 状态。
+- [x] 4.4 实现 SQ 引擎，负责取出 WQE、校验 QP 状态、解码工作请求操作码，并分发到 DMA 或 transport 逻辑。
+- [x] 4.5 实现 RQ 引擎，消费 Recv WQE 以接收入站 Send payload，并将写入操作分发到 DMA。
+- [x] 4.6 实现 QP 销毁和错误清理，包含 pending work 静默等待和 flushed completion。
+- [x] 4.7 添加 QP 测试，覆盖生命周期、合法/非法状态迁移、SQ 处理、RQ 处理、错误迁移以及 QPN 别名防护。
 
-## 5. CQ Manager and Completion Engine
+## 5. CQ 管理器与完成引擎
 
-- [x] 5.1 Implement CQ context table with buffer address, depth, producer index, consumer index, owner function, MSI-X vector, moderation count, moderation timer, and arm state.
-- [x] 5.2 Implement completion engine that accepts work completion events and formats 64-byte CQEs.
-- [x] 5.3 Implement CQE write path that calculates host CQ buffer address and emits DMA/PCIe memory writes.
-- [x] 5.4 Implement CQ producer/consumer wraparound logic and overflow detection.
-- [x] 5.5 Implement CQ notification logic for polling mode, solicited events, interrupt moderation count, and moderation timer.
-- [x] 5.6 Add CQ tests for CQE formatting, producer/consumer updates, overflow, CQ arm races, moderation count, and MSI-X request generation.
+- [x] 5.1 实现 CQ context 表，包含 buffer 地址、深度、producer index、consumer index、owner function、MSI-X 向量、中断调节计数、中断调节定时器以及 arm 状态。
+- [x] 5.2 实现完成引擎，接收工作完成事件并格式化为 64 字节 CQE。
+- [x] 5.3 实现 CQE 写入路径，计算主机 CQ buffer 地址并发出 DMA/PCIe 内存写。
+- [x] 5.4 实现 CQ producer/consumer 回绕逻辑以及溢出检测。
+- [x] 5.5 实现 CQ 通知逻辑，支持轮询模式、solicited 事件、中断调节计数和调节定时器。
+- [x] 5.6 添加 CQ 测试，覆盖 CQE 格式化、producer/consumer 更新、溢出、CQ arm 竞态、调节计数以及 MSI-X 请求生成。
 
-## 6. MR Manager and Memory Protection
+## 6. MR 管理器与内存保护
 
-- [x] 6.1 Implement MR table with valid bit, lkey, rkey, virtual base, physical base, length, page size, access flags, PD, owner function, and refcount.
-- [x] 6.2 Implement MR registration command handling from pinned scatter-gather page lists.
-- [x] 6.3 Implement MR deregistration with pending-deregister state and in-flight DMA refcount drain.
-- [x] 6.4 Implement local lkey and remote rkey direction checks.
-- [x] 6.5 Implement access permission checks for local read/write, remote read/write, remote atomic, and memory window bind.
-- [x] 6.6 Implement protection domain checks for local and remote operations.
-- [x] 6.7 Implement memory window bind, unbind, permission subset validation, and invalidation on QP error where required.
-- [x] 6.8 Add MR tests for registration, deregistration, translation, bounds rejection, PD mismatch, key direction, permission rejection, and memory window binding.
+- [x] 6.1 实现 MR 表，包含 valid 位、lkey、rkey、虚拟基地址、物理基地址、长度、页大小、访问权限标志、PD、owner function 以及 refcount。
+- [x] 6.2 实现 MR 注册命令处理，支持来自 pinned scatter-gather page list 的注册。
+- [x] 6.3 实现 MR 注销，包含 pending-deregister 状态以及 in-flight DMA refcount 排空等待。
+- [x] 6.4 实现本地 lkey 和远端 rkey 的方向检查。
+- [x] 6.5 实现访问权限检查，覆盖本地读/写、远端读/写、远端原子操作以及 memory window bind。
+- [x] 6.6 实现保护域（PD）检查，覆盖本地和远端操作。
+- [x] 6.7 实现 memory window 的 bind、unbind、权限子集校验以及 QP 错误时的 invalidation。
+- [x] 6.8 添加 MR 测试，覆盖注册、注销、地址翻译、越界拒绝、PD 不匹配、key 方向、权限拒绝以及 memory window bind。
 
-## 7. Scatter-Gather DMA Engine
+## 7. Scatter-Gather DMA 引擎
 
-- [x] 7.1 Implement DMA descriptor format and dispatcher for Send, Recv, RDMA Write, RDMA Read, and CQE writes.
-- [x] 7.2 Implement WQE and SGE fetch support for inline and extended SGE lists up to 256 entries.
-- [x] 7.3 Implement SGE traversal with total-length accounting and zero-overlap validation.
-- [x] 7.4 Implement MR lookup and permission integration for every DMA segment.
-- [x] 7.5 Implement host memory read path for Send and RDMA Write payload generation.
+- [x] 7.1 实现 DMA descriptor 格式和调度器，支持 Send、Recv、RDMA Write、RDMA Read 以及 CQE 写入。
+- [x] 7.2 实现 WQE 和 SGE fetch 支持，包括 inline 和 extended SGE list（最多 256 条）。
+- [x] 7.3 实现 SGE 遍历，包含总长度累计以及零重叠校验。
+- [x] 7.4 实现对每个 DMA segment 的 MR 查找和权限集成。
+- [x] 7.5 实现主机内存读路径，用于 Send 和 RDMA Write 的 payload 生成。
 - [ ] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
 - [ ] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
 - [ ] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
