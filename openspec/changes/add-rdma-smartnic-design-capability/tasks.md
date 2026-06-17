@@ -63,7 +63,7 @@
 - [x] 7.3 实现 SGE 遍历，包含总长度累计以及零重叠校验。
 - [x] 7.4 实现对每个 DMA segment 的 MR 查找和权限集成。
 - [x] 7.5 实现主机内存读路径，用于 Send 和 RDMA Write 的 payload 生成。
-- [ ] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
+- [x] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
 - [ ] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
 - [ ] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
 - [ ] 7.9 Implement DMA error propagation into completion status.

@@ -145,9 +145,11 @@ package smartnic_pkg;
     parameter int INLINE_DATA_W   = INLINE_DATA_BYTES * 8; // inline payload packed 宽度。
     parameter int DMA_HOST_READ_TAG_W = 16; // fetcher 发起 host read 使用的 tag 位宽。
     parameter int DMA_READ_TAG_W = 32; // payload host read path 使用的 tag 位宽。
+    parameter int DMA_WRITE_TAG_W = 32; // payload host write path 使用的 tag 位宽。
     parameter int DMA_PAYLOAD_DATA_W = PCIE_TLP_DATA_W; // transport payload stream 数据位宽。
     parameter int DMA_PAYLOAD_KEEP_W = DMA_PAYLOAD_DATA_W / 8; // payload stream byte-enable/keep 位宽。
     parameter int DMA_MAX_READ_BYTES = DMA_PAYLOAD_DATA_W / 8; // 7.5 阶段单个 host read chunk 最大字节数。
+    parameter int DMA_MAX_WRITE_BYTES = DMA_PAYLOAD_DATA_W / 8; // 7.6 阶段单个 host write beat 最大字节数。
     parameter int DMA_BYTE_OFFSET_W = DMA_LEN_W; // SGE traversal 输出的 WR 内字节偏移位宽。
     parameter int DMA_TOTAL_LEN_W = DMA_LEN_W + 1; // 总长度累计多 1 bit，用于检测 32-bit length 溢出。
     parameter int SGE_TRAVERSAL_TIMEOUT_CYCLES = 1024; // 等待 SGE last 标志的超时周期。
@@ -493,6 +495,40 @@ package smartnic_pkg;
         logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 关联 segment index。
         logic [6:0]                 chunk_index;      // segment 内 read chunk 序号。
     } dma_read_tag_t;
+
+    typedef enum logic [3:0] {
+        DMA_HW_STATE_IDLE            = 4'd0, // 等待 protected segment。
+        DMA_HW_STATE_ACCEPT_SEGMENT  = 4'd1, // 锁存 protected segment。
+        DMA_HW_STATE_WAIT_PAYLOAD    = 4'd2, // 等待 transport/RQ payload。
+        DMA_HW_STATE_VALIDATE_WRITE  = 4'd3, // 校验 payload 与 segment 匹配和范围。
+        DMA_HW_STATE_ISSUE_WRITE_REQ = 4'd4, // 发出一个 PCIe/DMA write request。
+        DMA_HW_STATE_WAIT_WRITE_CPL  = 4'd5, // 等待 write completion。
+        DMA_HW_STATE_EMIT_DONE       = 4'd6, // 输出 write_done。
+        DMA_HW_STATE_RELEASE_REF     = 4'd7, // 释放 MR/MW refcount token。
+        DMA_HW_STATE_DONE            = 4'd8, // 当前 segment 完成。
+        DMA_HW_STATE_ERROR           = 4'd9  // 输出错误/释放 refcount 后返回。
+    } dma_host_write_state_e;
+
+    typedef enum logic [15:0] {
+        DMA_HW_ERR_NONE              = 16'h0000, // 无错误。
+        DMA_HW_ERR_UNSUPPORTED_OP    = 16'h0001, // 非 host-write operation。
+        DMA_HW_ERR_ZERO_SEGMENT_LEN  = 16'h0002, // protected segment length 为 0。
+        DMA_HW_ERR_ZERO_PAYLOAD_LEN  = 16'h0003, // payload length 为 0。
+        DMA_HW_ERR_PAYLOAD_MISMATCH  = 16'h0004, // payload desc_id/qpn/owner/operation 不匹配。
+        DMA_HW_ERR_BOUNDS            = 16'h0005, // payload 超出 protected segment 范围。
+        DMA_HW_ERR_ADDR_OVERFLOW     = 16'h0006, // write 地址加法溢出。
+        DMA_HW_ERR_CPL_ERROR         = 16'h0007, // PCIe/DMA write completion 报错。
+        DMA_HW_ERR_TAG_MISMATCH      = 16'h0008, // completion tag 与当前请求不匹配。
+        DMA_HW_ERR_REQ_TIMEOUT       = 16'h0009, // write request 长时间无法发出。
+        DMA_HW_ERR_PAYLOAD_ERROR     = 16'h000a, // 上游 payload 已携带错误。
+        DMA_HW_ERR_REF_RELEASE       = 16'h000b  // refcount release 返回错误，当前阶段预留。
+    } dma_host_write_error_e;
+
+    typedef struct packed {
+        logic [15:0]                desc_id;          // 关联 descriptor ID。
+        logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 关联 segment index。
+        logic [6:0]                 beat_index;       // segment 内 write beat 序号。
+    } dma_write_tag_t;
 
     typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
 
