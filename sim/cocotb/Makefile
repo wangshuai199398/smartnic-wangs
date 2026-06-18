@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-host-read-path test-dma-host-write-path clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-host-read-path test-dma-host-write-path clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -92,6 +92,7 @@ dma-tests:
 		$(MAKE) test-dma-wqe-sge-fetcher; \
 		$(MAKE) test-dma-sge-traversal; \
 		$(MAKE) test-dma-mr-integration; \
+		$(MAKE) test-dma-segment-splitter; \
 		$(MAKE) test-dma-host-read-path; \
 		$(MAKE) test-dma-host-write-path; \
 	fi
@@ -269,6 +270,11 @@ test-dma-sge-traversal:
 test-dma-mr-integration:
 	$(MAKE) TOPLEVEL=dma_mr_integration MODULE=test_dma_mr_integration \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/mr/mr_key_checker.sv ../../rtl/mr/mr_access_checker.sv ../../rtl/mr/mr_pd_checker.sv ../../rtl/dma/dma_mr_integration.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-dma-segment-splitter:
+	$(MAKE) TOPLEVEL=dma_segment_splitter MODULE=test_dma_segment_splitter \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_segment_splitter.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 test-dma-host-read-path:

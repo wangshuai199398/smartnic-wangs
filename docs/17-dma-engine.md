@@ -425,3 +425,85 @@ PCIe/DMA write completion 返回后，模块检查 completion tag 和 status：
 - payload input error。
 
 这些错误当前只停在 DMA host write path 输出边界，不直接生成 CQE。后续 7.9 会把它们传播到 work completion status。
+
+## PMTU 和 4KB Boundary Split
+
+7.7 阶段新增 `rtl/dma/dma_segment_splitter.sv`。它位于 MR 保护检查之后、host read/write path 之前：
+
+```text
+dma_mr_integration
+  -> dma_segment_splitter
+  -> dma_host_read_path / dma_host_write_path
+```
+
+这样放置的原因是：splitter 输入已经是 protected segment，说明 lkey/rkey、access_flags、PD、bounds 和 VA->PA 都通过了检查。splitter 不再重复做安全校验，只负责把一个大的、合法的物理连续 segment 切成更适合 DMA request 和 RoCEv2 payload 的小段。
+
+### Split 规则
+
+每次输出的 `split_segment_len` 由以下约束共同决定：
+
+```text
+split_len = min(
+  remaining_len,
+  enable_pmtu_split ? pmtu_bytes : remaining_len,
+  enable_4kb_boundary_split ? page_remaining : remaining_len,
+  max_dma_segment_bytes == 0 ? 4096 : max_dma_segment_bytes
+)
+```
+
+其中 4KB 页内剩余空间为：
+
+```text
+page_remaining = 4096 - current_pa[11:0]
+```
+
+如果 `current_pa` 已经 4KB 对齐，则 `current_pa[11:0] == 0`，`page_remaining = 4096`。
+
+当前支持的合法 PMTU 配置为 256、512、1024、2048 和 4096 字节。`enable_pmtu_split=1` 且 `pmtu_bytes` 不在这些值中时，模块返回 `DMA_SPLIT_ERR_PMTU_CONFIG`。`max_dma_segment_bytes=0` 使用默认 4096 字节限制。
+
+### 输出字段
+
+每个 split segment 都会透传：
+
+- `desc_id`
+- `qpn`
+- `owner_function`
+- `pd_id`
+- `operation`
+- `segment_index`
+- `mr_refcount_token`
+- `flags`
+
+同时新增：
+
+- `split_segment_sub_index`：从 0 开始递增；
+- `split_segment_va` / `split_segment_pa`：原 VA/PA 加上已经输出的字节数；
+- `split_segment_byte_offset`：原 byte offset 加上已经输出的字节数；
+- `split_segment_is_segment_last`：当前 protected segment 的最后一个 split 才为 1；
+- `split_segment_is_wqe_last`：只有输入 `protected_segment_is_last=1` 且当前 split 是最后一个 split 时才为 1。
+
+### Refcount Token
+
+一个 protected segment 被拆成多个 split segment 时，所有 split segment 都携带同一个 `mr_refcount_token`。splitter 不释放 refcount，也不增加新的 refcount。
+
+后续接线时需要注意：如果 7.5/7.6 直接消费 split segment，那么 refcount release 语义应以“原 protected segment 的所有 split 都完成”为准。当前阶段只定义和测试 split 输出，不实现跨 split 的 refcount 聚合释放；真实完成路径和错误传播会在后续 DMA 集成与 7.9 中继续收敛。
+
+### Backpressure
+
+`split_segment_ready=0` 时，splitter 保持当前 split segment，不丢数据。只有当前 protected segment 的所有 split 都输出完成后，`protected_segment_ready` 才会重新允许接收下一段。
+
+这让下游 host read/write path 可以用普通 ready/valid 节奏消费 split segment，而上游 MR integration 不需要关心 PMTU 或页边界细节。
+
+### Error Path
+
+当前 splitter 覆盖以下错误：
+
+- `protected_segment_len=0`；
+- PMTU 配置非法；
+- PA + length overflow；
+- VA + length overflow；
+- 计算出的 `split_len=0`；
+- split sub_index overflow；
+- output backpressure timeout 预留。
+
+这些错误输出在 `split_segment_error_code` 上。当前阶段不把错误映射到 CQE；后续 7.9 会统一处理 DMA error propagation。

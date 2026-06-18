@@ -152,6 +152,11 @@ package smartnic_pkg;
     parameter int DMA_MAX_WRITE_BYTES = DMA_PAYLOAD_DATA_W / 8; // 7.6 阶段单个 host write beat 最大字节数。
     parameter int DMA_BYTE_OFFSET_W = DMA_LEN_W; // SGE traversal 输出的 WR 内字节偏移位宽。
     parameter int DMA_TOTAL_LEN_W = DMA_LEN_W + 1; // 总长度累计多 1 bit，用于检测 32-bit length 溢出。
+    parameter int DMA_SPLIT_SUB_INDEX_W = 16; // 一个 protected segment 内 split segment 序号位宽。
+    parameter int PAGE_4KB_BYTES = 4096; // 4KB 物理页边界大小，7.7 阶段用于 DMA segment split。
+    parameter int PAGE_4KB_OFFSET_W = 12; // 4KB page offset 位宽。
+    parameter int DMA_SPLIT_DEFAULT_MAX_BYTES = 4096; // max_dma_segment_bytes 为 0 时使用的默认限制。
+    parameter int DMA_SPLIT_TIMEOUT_CYCLES = 1024; // split output backpressure 预留超时周期。
     parameter int SGE_TRAVERSAL_TIMEOUT_CYCLES = 1024; // 等待 SGE last 标志的超时周期。
     parameter int MAX_QP          = 1 << QP_ID_W; // 逻辑 QPN 空间大小。
     parameter int MAX_CQ          = 1 << CQ_ID_W; // 逻辑 CQN 空间大小。
@@ -529,6 +534,49 @@ package smartnic_pkg;
         logic [DMA_SGE_COUNT_W-1:0] segment_index;    // 关联 segment index。
         logic [6:0]                 beat_index;       // segment 内 write beat 序号。
     } dma_write_tag_t;
+
+    typedef enum logic [3:0] {
+        DMA_SPLIT_STATE_IDLE          = 4'd0, // 等待 protected segment。
+        DMA_SPLIT_STATE_ACCEPT        = 4'd1, // 锁存 protected segment。
+        DMA_SPLIT_STATE_VALIDATE_CFG  = 4'd2, // 校验 length、PMTU、地址范围和配置。
+        DMA_SPLIT_STATE_CALC_PAGE     = 4'd3, // 计算当前 PA 到 4KB 页边界的剩余字节。
+        DMA_SPLIT_STATE_CALC_LEN      = 4'd4, // 根据 remaining/PMTU/page/max 计算 split_len。
+        DMA_SPLIT_STATE_EMIT          = 4'd5, // 输出一个 split segment。
+        DMA_SPLIT_STATE_UPDATE        = 4'd6, // 更新 remaining/emitted/sub_index。
+        DMA_SPLIT_STATE_DONE          = 4'd7, // 当前 protected segment 全部拆分完成。
+        DMA_SPLIT_STATE_ERROR         = 4'd8  // 输出错误 split segment 后返回。
+    } dma_segment_split_state_e;
+
+    typedef enum logic [15:0] {
+        DMA_SPLIT_ERR_NONE            = 16'h0000, // 无错误。
+        DMA_SPLIT_ERR_ZERO_LENGTH     = 16'h0001, // protected_segment_len 为 0。
+        DMA_SPLIT_ERR_PMTU_CONFIG     = 16'h0002, // enable_pmtu_split 时 pmtu_bytes 非法。
+        DMA_SPLIT_ERR_MAX_CONFIG      = 16'h0003, // max_dma_segment_bytes 配置非法。
+        DMA_SPLIT_ERR_PA_OVERFLOW     = 16'h0004, // PA + length 溢出。
+        DMA_SPLIT_ERR_VA_OVERFLOW     = 16'h0005, // VA + length 溢出。
+        DMA_SPLIT_ERR_ZERO_SPLIT      = 16'h0006, // 计算出的 split_len 为 0。
+        DMA_SPLIT_ERR_SUB_INDEX_OVER  = 16'h0007, // split sub_index 溢出。
+        DMA_SPLIT_ERR_OUTPUT_TIMEOUT  = 16'h0008  // split_segment_ready 长时间不响应，当前阶段预留。
+    } dma_segment_split_error_e;
+
+    typedef struct packed {
+        logic [15:0]                         desc_id;          // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]                  qpn;              // segment 所属 QPN。
+        logic [VF_ID_W-1:0]                  owner_function;   // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]                  pd_id;            // 已校验 PD。
+        mr_operation_e                       operation;        // 已校验 operation。
+        logic [DMA_SGE_COUNT_W-1:0]          segment_index;    // 原 protected segment index。
+        logic [DMA_SPLIT_SUB_INDEX_W-1:0]    sub_index;        // 当前 protected segment 内 split 序号。
+        logic [ADDR_W-1:0]                   va;               // 当前 split 的 VA。
+        logic [ADDR_W-1:0]                   pa;               // 当前 split 的 PA。
+        logic [DMA_LEN_W-1:0]                len;              // 当前 split 长度。
+        logic [DMA_BYTE_OFFSET_W-1:0]        byte_offset;      // WR payload 内偏移。
+        logic                                is_segment_last;  // 是否为当前 protected segment 的最后一个 split。
+        logic                                is_wqe_last;      // 是否同时为 WQE 的最后一个 split。
+        mr_ref_token_t                       mr_refcount_token;// 原 protected segment 的 MR/MW refcount token。
+        logic [15:0]                         flags;            // flags 透传。
+        dma_segment_split_error_e            error_code;       // split 错误码，成功为 NONE。
+    } split_segment_t;
 
     typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
 
