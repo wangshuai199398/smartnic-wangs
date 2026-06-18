@@ -157,6 +157,15 @@ package smartnic_pkg;
     parameter int PAGE_4KB_OFFSET_W = 12; // 4KB page offset 位宽。
     parameter int DMA_SPLIT_DEFAULT_MAX_BYTES = 4096; // max_dma_segment_bytes 为 0 时使用的默认限制。
     parameter int DMA_SPLIT_TIMEOUT_CYCLES = 1024; // split output backpressure 预留超时周期。
+    parameter int MAX_DMA_ARB_SOURCES = 7; // 7.8 阶段建模的 DMA arbitration source 数量。
+    parameter int DMA_ARB_SOURCE_ID_W = 3; // 7 个 source 的 source_id 位宽。
+    parameter int DMA_ARB_PRIORITY_W = 4; // DMA arbitration priority 位宽。
+    parameter int DMA_ARB_WEIGHT_W = 8; // Weighted round-robin weight/counter 位宽。
+    parameter int DMA_ARB_PAYLOAD_W = 256; // 仲裁透传 payload/metadata 位宽。
+    parameter int DMA_ARB_WAIT_COUNTER_W = 16; // starvation wait counter 位宽。
+    parameter logic [DMA_ARB_WAIT_COUNTER_W-1:0] DMA_ARB_DEFAULT_STARVATION_THRESHOLD = 16'd64; // 默认 starvation guard 阈值。
+    parameter int MAX_DMA_ERROR_SOURCES = 9; // 7.9 阶段统一汇聚的 DMA error source lane 数量。
+    parameter int DMA_ERROR_SOURCE_ID_W = 4; // DMA error source ID 位宽，覆盖 dispatcher/fetch/MR/host/arbiter。
     parameter int SGE_TRAVERSAL_TIMEOUT_CYCLES = 1024; // 等待 SGE last 标志的超时周期。
     parameter int MAX_QP          = 1 << QP_ID_W; // 逻辑 QPN 空间大小。
     parameter int MAX_CQ          = 1 << CQ_ID_W; // 逻辑 CQN 空间大小。
@@ -577,6 +586,130 @@ package smartnic_pkg;
         logic [15:0]                         flags;            // flags 透传。
         dma_segment_split_error_e            error_code;       // split 错误码，成功为 NONE。
     } split_segment_t;
+
+    typedef enum logic [1:0] {
+        DMA_ARB_POLICY_FIXED_PRIORITY = 2'd0, // 固定优先级：CQE > RQ/RDMA read response > SQ/RDMA write > fetch。
+        DMA_ARB_POLICY_ROUND_ROBIN    = 2'd1, // 从 last_grant_source 后一个 source 开始轮转。
+        DMA_ARB_POLICY_WEIGHTED_RR    = 2'd2, // 按每个 source 的 weight 连续服务。
+        DMA_ARB_POLICY_STRICT_GUARD   = 2'd3  // 严格优先级，但 starvation source 可临时提升。
+    } dma_arb_policy_e;
+
+    typedef enum logic [3:0] {
+        DMA_ARB_STATE_IDLE            = 4'd0, // 等待任意 source valid。
+        DMA_ARB_STATE_COLLECT         = 4'd1, // 采样当前 valid/metadata。
+        DMA_ARB_STATE_SELECT_POLICY   = 4'd2, // 根据配置选择 fixed/RR/WRR/guard。
+        DMA_ARB_STATE_SELECT_SOURCE   = 4'd3, // 选择 winning source。
+        DMA_ARB_STATE_HOLD_GRANT      = 4'd4, // 保持 grant，等待下游 ready。
+        DMA_ARB_STATE_UPDATE_FAIRNESS = 4'd5, // 更新 last_grant、weight 和 wait counters。
+        DMA_ARB_STATE_DONE            = 4'd6, // 本次 grant 完成。
+        DMA_ARB_STATE_ERROR           = 4'd7  // 策略或内部状态错误。
+    } dma_arb_state_e;
+
+    typedef enum logic [DMA_ARB_SOURCE_ID_W-1:0] {
+        DMA_SRC_SQ_HOST_READ          = 3'd0, // SQ Send host read。
+        DMA_SRC_RQ_HOST_WRITE         = 3'd1, // RQ Recv host write。
+        DMA_SRC_RDMA_WRITE_HOST_READ  = 3'd2, // RDMA Write payload host read。
+        DMA_SRC_RDMA_READ_RESP_WRITE  = 3'd3, // RDMA Read response host write。
+        DMA_SRC_CQE_WRITE             = 3'd4, // CQE host memory write。
+        DMA_SRC_WQE_FETCH             = 3'd5, // WQE fetch。
+        DMA_SRC_SGE_FETCH             = 3'd6  // SGE fetch。
+    } dma_source_id_e;
+
+    typedef enum logic [3:0] {
+        DMA_ARB_ERR_NONE              = 4'd0, // 无错误。
+        DMA_ARB_ERR_NO_VALID          = 4'd1, // 没有可 grant 的 source。
+        DMA_ARB_ERR_INVALID_POLICY    = 4'd2, // 未知 arbitration policy。
+        DMA_ARB_ERR_INVALID_SOURCE    = 4'd3  // 选出的 source_id 越界。
+    } dma_arb_error_e;
+
+    typedef struct packed {
+        dma_source_id_e             source_id;       // 请求来源。
+        logic [QP_ID_W-1:0]         qpn;             // 请求关联 QPN。
+        logic [VF_ID_W-1:0]         owner_function;  // 请求所属 function。
+        logic [15:0]                desc_id;         // descriptor ID，后续错误/完成路径使用。
+        mr_operation_e              operation;       // MR/DMA operation。
+        dma_direction_e             direction;       // host read/write/fetch/CQE write 方向。
+        logic [DMA_LEN_W-1:0]       len;             // 请求长度。
+        logic [DMA_ARB_PRIORITY_W-1:0] priority;     // source 内部优先级。
+        logic [DMA_ARB_WEIGHT_W-1:0] weight;         // WRR weight，0 表示 disabled。
+        logic [DMA_ARB_PAYLOAD_W-1:0] payload;       // 透传 metadata/payload。
+    } dma_arb_req_t;
+
+    typedef struct packed {
+        dma_source_id_e             source_id;       // grant 来源。
+        logic [QP_ID_W-1:0]         qpn;             // grant 关联 QPN。
+        logic [VF_ID_W-1:0]         owner_function;  // grant 所属 function。
+        logic [15:0]                desc_id;         // descriptor ID。
+        mr_operation_e              operation;       // operation。
+        dma_direction_e             direction;       // 方向。
+        logic [DMA_LEN_W-1:0]       len;             // 长度。
+        logic [DMA_ARB_PAYLOAD_W-1:0] payload;       // 透传 metadata/payload。
+        dma_arb_policy_e            policy_used;     // 本次 grant 使用的 policy。
+    } dma_arb_grant_t;
+
+    typedef enum logic [DMA_ERROR_SOURCE_ID_W-1:0] {
+        DMA_ERR_SRC_DISPATCHER      = 4'd0, // dma_descriptor_dispatcher 报告 descriptor/opcode 错误。
+        DMA_ERR_SRC_WQE_FETCH       = 4'd1, // dma_wqe_sge_fetcher 的 WQE fetch/decode 错误。
+        DMA_ERR_SRC_SGE_FETCH       = 4'd2, // dma_wqe_sge_fetcher 的 extended SGE fetch 错误。
+        DMA_ERR_SRC_SGE_TRAVERSAL   = 4'd3, // dma_sge_traversal 的长度/重叠/索引错误。
+        DMA_ERR_SRC_MR_INTEGRATION  = 4'd4, // dma_mr_integration 的 key/权限/PD/地址错误。
+        DMA_ERR_SRC_SEGMENT_SPLIT   = 4'd5, // dma_segment_splitter 的 PMTU/4KB 分段错误。
+        DMA_ERR_SRC_HOST_READ       = 4'd6, // dma_host_read_path 的 PCIe read/payload 错误。
+        DMA_ERR_SRC_HOST_WRITE      = 4'd7, // dma_host_write_path 的 PCIe write/payload 错误。
+        DMA_ERR_SRC_ARBITER         = 4'd8  // dma_arbiter 的 malformed request 或策略错误。
+    } dma_error_source_e;
+
+    typedef enum logic [15:0] {
+        DMA_ERR_NONE                = 16'h0000, // 无错误。
+        DMA_ERR_MR_LOOKUP_MISS      = 16'h0001, // MR/MW lookup miss。
+        DMA_ERR_KEY_DIRECTION       = 16'h0002, // lkey/rkey 使用方向错误。
+        DMA_ERR_ACCESS_DENIED       = 16'h0003, // access_flags 或 owner_function 拒绝访问。
+        DMA_ERR_PD_MISMATCH         = 16'h0004, // QP PD 与 MR/MW PD 不匹配。
+        DMA_ERR_BOUNDS              = 16'h0005, // VA/PA/length 越界或 bounds check 失败。
+        DMA_ERR_SGE_LENGTH          = 16'h0006, // SGE total length underrun/overrun。
+        DMA_ERR_SGE_OVERLAP         = 16'h0007, // SGE 虚拟地址范围重叠。
+        DMA_ERR_WQE_FETCH           = 16'h0008, // WQE fetch 或 decode 失败。
+        DMA_ERR_SGE_FETCH           = 16'h0009, // extended SGE fetch 失败。
+        DMA_ERR_UNSUPPORTED_OPCODE  = 16'h000a, // WQE 或 descriptor opcode 不受支持。
+        DMA_ERR_PCIE_READ           = 16'h000b, // PCIe/DMA read response 报错。
+        DMA_ERR_PCIE_WRITE          = 16'h000c, // PCIe/DMA write completion 报错。
+        DMA_ERR_CQ_OVERFLOW         = 16'h000d, // CQ full/overflow。
+        DMA_ERR_ARB_MALFORMED       = 16'h000e, // arbitration/descriptor metadata malformed。
+        DMA_ERR_TIMEOUT             = 16'h000f, // 等待 ready/response 超时。
+        DMA_ERR_GENERAL             = 16'h00ff  // 未分类 DMA 错误。
+    } dma_error_code_e;
+
+    typedef enum logic [3:0] {
+        DMA_ERR_PROP_STATE_IDLE        = 4'd0, // 等待任一 DMA error source。
+        DMA_ERR_PROP_STATE_SELECT      = 4'd1, // 按 fatal/保护/host/fetch/split/arbiter 优先级选择。
+        DMA_ERR_PROP_STATE_CAPTURE     = 4'd2, // 锁存被选中的 error event。
+        DMA_ERR_PROP_STATE_MAP_STATUS  = 4'd3, // 将 DMA error code 映射为 completion status。
+        DMA_ERR_PROP_STATE_EMIT_CMPL   = 4'd4, // 输出 completion error event。
+        DMA_ERR_PROP_STATE_EMIT_QP_ERR = 4'd5, // fatal 错误额外输出 QP error request。
+        DMA_ERR_PROP_STATE_DONE        = 4'd6, // 当前错误处理完成。
+        DMA_ERR_PROP_STATE_ERROR       = 4'd7  // 内部状态异常。
+    } dma_error_propagation_state_e;
+
+    typedef struct packed {
+        dma_error_source_e          source_id;       // 报错子模块来源。
+        logic [15:0]                desc_id;         // descriptor ID，用于 debug 和 completion 关联。
+        logic [QP_ID_W-1:0]         qpn;             // 错误关联 QPN。
+        logic [CQ_ID_W-1:0]         cqn;             // 错误 completion 目标 CQN；未知时为 0。
+        logic [VF_ID_W-1:0]         owner_function;  // 错误所属 PF/VF function。
+        logic [PD_ID_W-1:0]         pd_id;           // 错误关联 PD。
+        mr_operation_e              operation;       // 报错时正在执行的 MR/DMA operation。
+        dma_direction_e             direction;       // 报错 DMA 方向。
+        logic [DMA_SGE_COUNT_W-1:0] segment_index;   // 报错 segment index。
+        logic [DMA_BYTE_OFFSET_W-1:0] byte_offset;   // WR 内报错字节偏移。
+        dma_error_code_e            dma_error_code;  // 统一 DMA error code。
+        cmpl_status_e               original_status; // 上游若已有 completion status，可透传或覆盖。
+        logic                       fatal;           // 1 表示需要请求 QP 进入 error cleanup。
+        logic                       retryable;       // 1 表示后续 retry engine 可以考虑重试，当前阶段只透传语义。
+        logic [WR_ID_W-1:0]         wr_id;           // 原始 WR ID；未知时为 0。
+        rdma_opcode_e               opcode;          // 原始 RDMA/WQE opcode；未知时可为 NOP。
+        logic [DMA_LEN_W-1:0]       byte_len;        // 已处理或报错相关 byte_len。
+        logic                       solicited;       // 错误 completion 是否按 solicited 语义通知。
+    } dma_error_event_t;
 
     typedef rdma_opcode_e wqe_opcode_e; // WQE opcode 与 RDMA Work Request opcode 共用编码。
 

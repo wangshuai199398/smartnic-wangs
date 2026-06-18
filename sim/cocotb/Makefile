@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-host-read-path test-dma-host-write-path clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -93,8 +93,10 @@ dma-tests:
 		$(MAKE) test-dma-sge-traversal; \
 		$(MAKE) test-dma-mr-integration; \
 		$(MAKE) test-dma-segment-splitter; \
+		$(MAKE) test-dma-arbiter; \
 		$(MAKE) test-dma-host-read-path; \
 		$(MAKE) test-dma-host-write-path; \
+		$(MAKE) test-dma-error-propagation; \
 	fi
 
 test-pcie-cfg:
@@ -277,6 +279,11 @@ test-dma-segment-splitter:
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_segment_splitter.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
+test-dma-arbiter:
+	$(MAKE) TOPLEVEL=dma_arbiter MODULE=test_dma_arbiter \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_arbiter.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
 test-dma-host-read-path:
 	$(MAKE) TOPLEVEL=dma_host_read_path MODULE=test_dma_host_read_path \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_host_read_path.sv" \
@@ -285,6 +292,11 @@ test-dma-host-read-path:
 test-dma-host-write-path:
 	$(MAKE) TOPLEVEL=dma_host_write_path MODULE=test_dma_host_write_path \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_host_write_path.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-dma-error-propagation:
+	$(MAKE) TOPLEVEL=dma_error_propagation MODULE=test_dma_error_propagation \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_error_propagation.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

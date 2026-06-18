@@ -57,7 +57,7 @@ dispatcher 使用 ready/valid 输入接收五类来源：
 CQE write > RQ write > SQ request > WQE fetch > SGE fetch
 ```
 
-这样设计的原因是当前阶段更适合学习和验证：固定优先级容易观察，也容易写单元测试。后续 7.8 会把这里替换或扩展为可配置公平仲裁，避免低优先级 QP 长时间得不到服务。
+这样设计的原因是当前阶段更适合学习和验证：固定优先级容易观察，也容易写单元测试。7.8 在 dispatcher 后续增加了独立 `dma_arbiter`，用于可配置公平仲裁，避免低优先级 QP 长时间得不到服务。
 
 如果目标输出 `ready=0`，dispatcher 会保持当前 descriptor，并持续拉高对应输出 `valid`，直到下游 ready。输入侧 ready 只在 descriptor 被接收时拉高，避免请求丢失。
 
@@ -70,7 +70,7 @@ CQE write > RQ write > SQ request > WQE fetch > SGE fetch
 - 7.4 会把 MR key direction、access permission、PD check 和 VA->PA translation 接入每个 DMA segment；
 - 7.5 和 7.6 会实现真实 host memory read/write；
 - 7.7 会实现 PMTU 和 4KB page boundary split；
-- 7.8 会实现公平仲裁；
+- 7.8 已新增独立 DMA arbiter，用于 fixed priority、round-robin、weighted round-robin 和 starvation guard；
 - 7.9 会把 DMA 错误传播到 completion status。
 
 ## WQE 和 SGE Fetch
@@ -283,7 +283,7 @@ key lookup 成功后，segment 会继续通过：
 - DMA arbitration；
 - completion error propagation。
 
-这些分别由 7.5、7.6、7.7、7.8 和 7.9 继续接上。
+这些分别由 7.5、7.6、7.7、7.8 和 7.9 分阶段接上，其中 7.8 已提供独立仲裁框架。
 
 ## Host Memory Read Path
 
@@ -507,3 +507,170 @@ page_remaining = 4096 - current_pa[11:0]
 - output backpressure timeout 预留。
 
 这些错误输出在 `split_segment_error_code` 上。当前阶段不把错误映射到 CQE；后续 7.9 会统一处理 DMA error propagation。
+
+## DMA Arbitration
+
+7.8 阶段新增 `rtl/dma/dma_arbiter.sv`。它把多个 DMA source 的请求收敛成一个 grant，用来在多个 active QP 和不同 DMA 子路径之间做可配置调度。
+
+当前建模 7 个 source：
+
+| Source | 典型来源 | 方向 |
+| --- | --- | --- |
+| `DMA_SRC_SQ_HOST_READ` | SQ Send host read | host read |
+| `DMA_SRC_RQ_HOST_WRITE` | RQ Recv buffer write | host write |
+| `DMA_SRC_RDMA_WRITE_HOST_READ` | RDMA Write payload read | host read |
+| `DMA_SRC_RDMA_READ_RESP_WRITE` | RDMA Read response delivery | host write |
+| `DMA_SRC_CQE_WRITE` | CQE write path | CQE write |
+| `DMA_SRC_WQE_FETCH` | SQ/RQ WQE fetch | WQE fetch |
+| `DMA_SRC_SGE_FETCH` | extended SGE list fetch | SGE fetch |
+
+每个 source 使用 ready/valid 输入，并携带：
+
+- `source_id`
+- `qpn`
+- `owner_function`
+- `desc_id`
+- `operation`
+- `direction`
+- `len`
+- `priority`
+- `weight`
+- `payload`
+
+grant 输出保留 `source_id`、`qpn` 和 `desc_id`，这是后续 7.9 DMA error propagation 的关键：任何 host read/write/fetch 错误都可以回溯到原始 source、QP 和 descriptor。
+
+### Fixed Priority
+
+固定优先级策略适合先保证关键路径低延迟。当前顺序是：
+
+```text
+CQE write
+  > RQ host write / RDMA Read response host write
+  > SQ host read / RDMA Write host read
+  > WQE fetch / SGE fetch
+```
+
+这样设计是因为 CQE write 和入站写回通常直接影响 completion 可见性和接收路径推进；fetch 路径可以稍后再优化。
+
+### Round-Robin
+
+Round-robin 从 `last_grant_source` 的下一个 source 开始扫描，选择第一个 valid source。grant 被 `grant_ready` 接受后更新 `last_grant_source`。无 valid 的 source 会被跳过。
+
+这个策略适合多个 QP/source 同时活跃时避免固定优先级长期偏向高优先级 source。
+
+### Weighted Round-Robin
+
+Weighted round-robin 为每个 source 使用 `weight`：
+
+- `weight=0` 表示该 source disabled；
+- 当前 source 最多连续服务 `weight` 次；
+- `wrr_service_count` 记录当前 source 已连续服务次数；
+- 达到 weight 后轮转到下一个 valid 且 weight 非 0 的 source。
+
+这为不同 DMA 类型提供粗粒度带宽配额。例如 CQE write 可以保持较高响应性，而大 payload read/write 可以按权重分享带宽。
+
+### Strict Priority With Starvation Guard
+
+Starvation guard 为每个 source 维护 `wait_counter`：
+
+- source valid 但没有被 grant 时，counter 增加；
+- source 被 grant 后，counter 清零；
+- counter 超过 `starvation_threshold` 时，`starvation_detected[source]` 置位；
+- strict guard policy 会优先选择 starvation source，然后再回到 fixed priority。
+
+这样能保留 strict priority 的低延迟特性，同时避免低优先级 fetch 或 payload path 长期拿不到 DMA 服务。
+
+### Backpressure
+
+当 `grant_ready=0` 时，arbiter 保持当前 grant，不选择新的 source。只有 grant 被接受时，对应 source 的 `req_ready` 才拉高；未被选中的 source `req_ready` 保持 0。
+
+这条规则让上游 source 可以用普通 ready/valid 语义保持请求，不需要知道当前仲裁策略。
+
+### 当前边界
+
+7.8 只实现仲裁和公平性状态：
+
+- 不执行真实 host read/write/fetch；
+- 不重新做 MR lookup 或 PMTU split；
+- 不实现跨 QP 的完整 credit/accounting；
+- 不把错误转换为 CQE。
+
+后续 7.9 会利用 grant 中携带的 `desc_id`、`qpn`、`source_id` 和 `direction`，把 DMA path 错误映射到 completion status。
+
+## DMA Error Propagation
+
+7.9 阶段新增 `rtl/dma/dma_error_propagation.sv`。它是 DMA 子系统的错误汇聚点：前面的 dispatcher、fetcher、SGE traversal、MR integration、splitter、host read/write path 和 arbiter 都可以把错误送到这里，然后统一转换成 CQ completion 能理解的状态。
+
+### Error Source
+
+当前定义 9 类错误来源：
+
+| Source | 典型错误 |
+| --- | --- |
+| `DMA_ERR_SRC_DISPATCHER` | unsupported opcode、descriptor malformed |
+| `DMA_ERR_SRC_WQE_FETCH` | WQE host read/decode 失败 |
+| `DMA_ERR_SRC_SGE_FETCH` | extended SGE fetch 失败 |
+| `DMA_ERR_SRC_SGE_TRAVERSAL` | SGE total length、overlap、index 错误 |
+| `DMA_ERR_SRC_MR_INTEGRATION` | lkey/rkey、access_flags、PD、bounds、refcount 错误 |
+| `DMA_ERR_SRC_SEGMENT_SPLIT` | PMTU/4KB split 配置或地址溢出错误 |
+| `DMA_ERR_SRC_HOST_READ` | PCIe read response 或 payload 输出错误 |
+| `DMA_ERR_SRC_HOST_WRITE` | PCIe write completion 或 payload 匹配错误 |
+| `DMA_ERR_SRC_ARBITER` | arbitration/descriptor metadata malformed |
+
+每条 error event 携带 `desc_id`、`qpn`、`cqn`、`owner_function`、`pd_id`、`operation`、`direction`、`segment_index`、`byte_offset`、`dma_error_code`、`fatal` 和 `retryable`。这些字段让后续 completion path 能定位是哪一个 WR、哪个 QP、哪一段 DMA 失败。
+
+### Completion Status Mapping
+
+`dma_error_propagation` 不直接写 CQE，而是输出 `completion_error_valid` 事件，交给 `completion_engine` 格式化 64-byte CQE。
+
+| DMA error | Completion status | 说明 |
+| --- | --- | --- |
+| `DMA_ERR_MR_LOOKUP_MISS` | `CMPL_LOC_PROT_ERR` | MR/MW lookup miss 是本地保护错误。 |
+| `DMA_ERR_KEY_DIRECTION` | `CMPL_LOC_PROT_ERR` 或 `CMPL_REM_ACCESS_ERR` | 本地路径映射本地保护错误；远端 operation 预留为 remote access error。 |
+| `DMA_ERR_ACCESS_DENIED` | `CMPL_LOC_PROT_ERR` 或 `CMPL_REM_ACCESS_ERR` | access_flags/owner 拒绝访问。 |
+| `DMA_ERR_PD_MISMATCH` | `CMPL_LOC_PROT_ERR` | QP PD 和 MR PD 不一致。 |
+| `DMA_ERR_BOUNDS` | `CMPL_LOC_LEN_ERR` | VA/PA/length 越界。 |
+| `DMA_ERR_SGE_LENGTH` | `CMPL_LOC_LEN_ERR` | SGE total length underrun/overrun。 |
+| `DMA_ERR_SGE_OVERLAP` | `CMPL_LOC_PROT_ERR` | SGE 地址重叠会破坏 buffer 语义。 |
+| `DMA_ERR_WQE_FETCH` | `CMPL_LOC_QP_OP_ERR` | WQE fetch/decode 失败，按 WR 错误处理。 |
+| `DMA_ERR_SGE_FETCH` | `CMPL_LOC_QP_OP_ERR` | extended SGE list fetch 失败。 |
+| `DMA_ERR_UNSUPPORTED_OPCODE` | `CMPL_LOC_QP_OP_ERR` | WQE/descriptor opcode 不支持。 |
+| `DMA_ERR_PCIE_READ` | `CMPL_DMA_ERR` | host read path 的 PCIe/DMA 错误。 |
+| `DMA_ERR_PCIE_WRITE` | `CMPL_DMA_ERR` | host write path 的 PCIe/DMA 错误。 |
+| `DMA_ERR_CQ_OVERFLOW` | `CMPL_CQ_OVERFLOW_ERR` | CQ full/overflow。 |
+| `DMA_ERR_ARB_MALFORMED` | `CMPL_LOC_QP_OP_ERR` | 仲裁输入 metadata 非法。 |
+| `DMA_ERR_TIMEOUT` | `CMPL_GENERAL_ERR` | 当前阶段未实现 retry engine，先归入通用错误。 |
+
+`completion_vendor_error` 会保留 source ID 和原始 DMA error code，便于仿真波形和驱动 debug。
+
+### Fatal And Retryable
+
+`fatal=0` 时，模块只生成错误 completion。这个路径适合单个 WR 失败但 QP 仍可继续工作的情况。
+
+`fatal=1` 时，模块先生成错误 completion，再输出：
+
+- `qp_error_req_valid`
+- `qp_error_qpn`
+- `qp_error_owner_function`
+- `qp_error_code`
+- `qp_error_desc_id`
+- `qp_error_source_id`
+
+这个请求交给 QP lifecycle/cleanup path 处理。这样设计的原因是 DMA error propagation 不拥有 QP context，也不应该直接修改 QP 状态；真正的 QP error transition、Doorbell blocking、pending work quiesce 和 flushed completion 仍由 4.6 的 cleanup manager 负责。
+
+`retryable=1` 只输出 `retry_hint_*` 调试/预留信号。当前阶段不实现 retry engine，也不生成 RoCEv2 NAK 或 remote error packet；这些属于后续 transport 阶段。
+
+### Arbitration And Backpressure
+
+多个 error source 同时 valid 时，当前使用固定优先级：
+
+```text
+fatal error
+  > MR/protection error
+  > host read/write error
+  > WQE/SGE fetch error
+  > traversal/split error
+  > arbiter/dispatcher error
+```
+
+当 `completion_error_ready=0` 时，模块保持当前 completion error event，不接收新的 source。fatal 错误还会在 completion 被接受后继续保持 `qp_error_req_valid`，直到 QP cleanup path ready。这个 ready/valid 规则保证错误不会因为下游 backpressure 而丢失。

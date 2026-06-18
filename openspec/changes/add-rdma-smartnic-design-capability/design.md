@@ -444,7 +444,7 @@ PF/VF 所有权必须在硬件可见的资源表中记录，并在 CSR、Doorbel
 
 ## 待解决问题
 
-- 首个 FPGA 原型目标板卡：Xilinx Alveo、Intel Agilex 还是其他平台？
+- ~~首个 FPGA 原型目标板卡：Xilinx Alveo、Intel Agilex 还是其他平台？~~ → **已决定：Xilinx VCU118（Virtex UltraScale+ XCVU9P）**
 - FPGA 原型构建中 100GbE MAC 和 PCIe 端点 IP 封装应使用哪个？
 - 用户态库是否先作为独立的 libsmartnic 适配层，还是一开始就做正式的 libibverbs provider 插件？
 - perftest、UCX 和 libfabric 的最低兼容性矩阵是什么，原型才算可用？

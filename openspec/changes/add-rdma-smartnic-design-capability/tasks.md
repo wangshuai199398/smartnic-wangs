@@ -65,8 +65,8 @@
 - [x] 7.5 实现主机内存读路径，用于 Send 和 RDMA Write 的 payload 生成。
 - [x] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
 - [x] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
-- [ ] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
-- [ ] 7.9 Implement DMA error propagation into completion status.
+- [x] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
+- [x] 7.9 Implement DMA error propagation into completion status.
 - [ ] 7.10 Add DMA tests for single SGE, multi-SGE, 256 SGE, unaligned segments, 4KB boundary split, arbitration fairness, and error injection.
 
 ## 8. Packet Parser and Packet Builder

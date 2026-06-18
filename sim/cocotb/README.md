@@ -42,8 +42,10 @@
 | `test_dma_sge_traversal.py` | `rtl/dma/dma_sge_traversal.sv` | SGE total-length accounting、byte_offset、256 SGE、zero-length 拒绝、overlap 检查、index 顺序、backpressure |
 | `test_dma_mr_integration.py` | `rtl/dma/dma_mr_integration.sv` | 每个 DMA segment 的 lkey/rkey 方向、access_flags、PD、bounds、MW 状态、refcount increment 和 protected segment backpressure |
 | `test_dma_segment_splitter.py` | `rtl/dma/dma_segment_splitter.sv` | PMTU split、4KB PA boundary split、max segment 限制、byte_offset/sub_index/last 标志、backpressure |
+| `test_dma_arbiter.py` | `rtl/dma/dma_arbiter.sv` | fixed priority、round-robin、weighted round-robin、starvation guard、grant backpressure、source ready |
 | `test_dma_host_read_path.py` | `rtl/dma/dma_host_read_path.sv` | Send/RDMA Write protected segment 到 PCIe read request、read response 到 payload stream、tag/length/error 检查、payload backpressure、refcount release |
 | `test_dma_host_write_path.py` | `rtl/dma/dma_host_write_path.sv` | Recv/RDMA Read response protected segment 和 payload stream 到 PCIe write request、write completion 到 done、tag/error 检查、write backpressure、refcount release |
+| `test_dma_error_propagation.py` | `rtl/dma/dma_error_propagation.sv` | DMA error source 到 completion status 映射、fatal QP error request、completion backpressure、多 source 优先级 |
 
 ## 运行方式
 
@@ -106,7 +108,9 @@ make -C sim/cocotb test-mr-integration
 make -C sim/cocotb test-dma-descriptor-dispatcher
 make -C sim/cocotb test-dma-wqe-sge-fetcher
 make -C sim/cocotb test-dma-segment-splitter
+make -C sim/cocotb test-dma-arbiter
 make -C sim/cocotb test-dma-host-write-path
+make -C sim/cocotb test-dma-error-propagation
 ```
 
 ## 当前限制
@@ -134,4 +138,6 @@ make -C sim/cocotb test-dma-host-write-path
 - DMA descriptor dispatcher 测试只验证 descriptor 分流和 backpressure，不执行真实 PCIe read/write、不遍历 SGE、不调用 MR checker，也不实现公平仲裁。
 - DMA WQE/SGE fetcher 测试只验证 host read 请求/响应接口、WQE/SGE decode 和 ready/valid 行为，不实现真实 PCIe read、SGE total-length accounting、zero-overlap validation 或 MR permission check。
 - DMA segment splitter 测试只验证 protected segment 的 PMTU/4KB/max 长度切分，不执行真实 host read/write，不释放 MR refcount，也不做 DMA arbitration 或 completion error propagation。
+- DMA arbiter 测试只验证多 source request 到单个 grant 的调度策略和 starvation guard，不执行真实 host read/write/fetch，也不做 completion error propagation。
 - DMA host write path 测试只验证 protected segment 和 payload stream 到 PCIe write request 的转换、write completion、错误输出和 refcount release，不实现真实 PCIe memory write、跨 segment 拼接、PMTU/4KB split 或 completion error propagation。
+- DMA error propagation 测试只验证 DMA 子模块错误到 completion status / QP error request 的映射，不实现 retry engine、remote error packet、RoCEv2 NAK 或 async event queue。
