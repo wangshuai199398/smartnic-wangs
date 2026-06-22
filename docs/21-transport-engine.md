@@ -97,3 +97,61 @@ RC 的可靠性需要三个最核心的 send-side 状态：PSN、outstanding win
 - TODO：RDMA Read request/response sequencing、atomic、multi-packet payload 和 PMTU 分段留给后续 9.x/transport 任务。
 - TODO：retry exhausted 只发出 QP error 请求，不直接修改 QP context；实际 cleanup 由 4.6 的 QP cleanup manager 负责。
 
+## 9.2 RC Receive-Side Engine
+
+`rtl/transport/rc_recv_engine.sv` 位于 8.x payload extractor 和后续 RQ/DMA/remote operation 处理之间：
+
+```text
+roce_payload_extractor
+  -> packet_meta_t + packet_payload_stream_t
+  -> rc_recv_engine
+  -> accepted payload to RQ/DMA/remote op path
+```
+
+只有通过 receive-side PSN 和 RQ 可用性检查的 packet 才会从 `accept_valid` 输出。duplicate、gap、RNR 或 unsupported opcode 都会走 drop/debug 路径，避免错误 packet 在主机内存上产生 DMA 副作用。
+
+### 接口
+
+| 接口 | 方向 | 作用 |
+| --- | --- | --- |
+| `cfg_valid/cfg_ready` | input | 配置一个最小 RC receive context，包括 QPN、owner function、PD、expected PSN、ACK 合并阈值和 timeout。 |
+| `rx_meta_valid/rx_meta_ready/rx_meta` | input | 接收 packet parser/payload extractor 输出的入站 metadata。 |
+| `rx_payload_valid/rx_payload_ready/rx_payload` | input | 接收与 metadata 对应的 payload beat。 |
+| `rq_buffer_available` | input | 表示 Send/Send with Imm 是否有可用 RQ buffer；没有则生成 RNR NAK。 |
+| `accept_valid/accept_ready` | output | PSN/RQ 检查通过后放行 packet metadata 和 payload。 |
+| `ack_event_valid/ack_event_ready` | output | 输出 ACK、sequence NAK 或 RNR NAK 事件。 |
+| `drop_valid/drop_ready` | output | 输出 duplicate/replay、gap、RNR、unsupported opcode 等 drop/debug 事件。 |
+
+### PSN Validation
+
+当前最小版本用 `expected_psn_q` 表示下一个期望接收的 PSN：
+
+| 条件 | 行为 |
+| --- | --- |
+| `packet.psn == expected_psn` | packet in-order，允许进入 `accept_valid`，并在接受后 `expected_psn += 1`。 |
+| `packet.psn < expected_psn` | duplicate/replay，drop，不放行 payload，重新 ACK `last_acked_psn`。 |
+| `packet.psn > expected_psn` | gap，drop，不放行 payload，生成 sequence NAK，指向当前 `expected_psn`。 |
+
+TODO：PSN 比较目前是普通数值比较，尚未实现 24-bit wraparound aware compare。
+
+### RNR NAK
+
+Send 和 Send with Immediate 需要远端 RQ buffer。如果 `rq_buffer_available=0`，模块生成 RNR NAK，并 drop 当前 packet。RDMA Write 和 RDMA Read Request 不消耗 RQ buffer，因此不会因为 RQ 为空触发 RNR。
+
+### ACK Coalescing
+
+模块保存 `pending_ack_count_q` 和 `ack_timer_q`：
+
+- `cfg_ack_coalesce_count <= 1` 时，每个成功接收的 packet 都会尽快 ACK。
+- `pending_ack_count >= cfg_ack_coalesce_count` 时，输出 ACK。
+- `cfg_ack_timeout != 0` 且 timer 到期时，输出 ACK。
+
+当前 ACK event 使用 `transport_rx_ack_event_t`，保留 `desc_id`、`qpn`、`cqn`、`owner_function`、`pd_id`、`opcode`、`status/error_code`，并提供最小 AETH placeholder 给后续 packet builder。
+
+### 当前 Stub/TODO
+
+- TODO：当前只保存一个最小 receive context，后续需要接 QP context table 的 per-QP `rq_psn`。
+- TODO：AETH syndrome/MSN 只是 placeholder，后续按 IBTA/RoCEv2 完整编码。
+- TODO：ACK coalescing 是基础 count/timer 模型，未实现真实 ACK scheduler 或 multi-QP arbitration。
+- TODO：RNR retry 计数、RNR timer、receiver not ready 状态机留给后续 transport/QP 集成。
+- TODO：RDMA Read request/response sequencing 和 remote memory access side effect 留给 9.3。

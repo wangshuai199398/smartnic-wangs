@@ -81,7 +81,7 @@
 ## 9. RoCEv2 传输引擎
 
 - [x] 9.1 实现 RC 发送侧 PSN 分配、未完成数据包追踪、ACK 处理、重试定时器以及重试耗尽处理。
-- [ ] 9.2 Implement RC receive-side PSN validation, duplicate/replay drop, gap NAK generation, ACK coalescing, and RNR NAK generation.
+- [x] 9.2 Implement RC receive-side PSN validation, duplicate/replay drop, gap NAK generation, ACK coalescing, and RNR NAK generation.
 - [ ] 9.3 Implement RDMA Read request and response sequencing for RC QPs.
 - [ ] 9.4 Implement RDMA Write and Send immediate-data handling.
 - [ ] 9.5 Implement UD transmit path with AH lookup, DETH generation, Q_Key handling, and no connection state.

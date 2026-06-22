@@ -1821,6 +1821,46 @@ package smartnic_pkg;
         logic                   retry_hint;     // NAK/retry hint 预留；9.1 仅作为 retry 触发提示。
     } transport_ack_event_t;
 
+    parameter int RC_RECV_ACK_COALESCE_W = 8; // 9.2 ACK 合并计数位宽。
+    parameter int RC_RECV_ACK_TIMER_W = 16;   // 9.2 ACK 合并 timer 位宽。
+
+    typedef enum logic [4:0] {
+        RC_RECV_STATUS_OK          = 5'd0,
+        RC_RECV_STATUS_DUPLICATE   = 5'd1,
+        RC_RECV_STATUS_GAP_NAK     = 5'd2,
+        RC_RECV_STATUS_RNR_NAK     = 5'd3,
+        RC_RECV_STATUS_BAD_OPCODE  = 5'd4,
+        RC_RECV_STATUS_NOT_READY   = 5'd5
+    } rc_recv_status_e;
+
+    typedef enum logic [3:0] {
+        RC_NAK_NONE     = 4'd0,
+        RC_NAK_SEQUENCE = 4'd1,
+        RC_NAK_RNR      = 4'd2,
+        RC_NAK_OPCODE   = 4'd3
+    } rc_nak_code_e;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // 本地 QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // 后续 completion/debug 关联 CQ。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // 入站 RoCEv2 opcode。
+        rc_recv_status_e        status;         // RX transport 处理结果。
+        logic [15:0]            error_code;     // 错误码，正常为 0。
+        logic [PSN_W-1:0]       packet_psn;     // 当前 packet PSN。
+        logic [PSN_W-1:0]       expected_psn;   // 处理后或 NAK 指向的期望 PSN。
+        logic [PSN_W-1:0]       ack_psn;        // ACK/NAK 携带的 PSN。
+        logic                   is_ack;         // 1 表示 ACK。
+        logic                   is_nak;         // 1 表示 NAK。
+        logic                   is_rnr;         // 1 表示 RNR NAK。
+        logic                   duplicate;      // 1 表示 duplicate/replay packet。
+        logic                   gap;            // 1 表示 packet_psn 高于 expected_psn。
+        rc_nak_code_e           nak_code;       // NAK 原因。
+        logic [31:0]            aeth;           // 供 packet builder 使用的最小 AETH placeholder。
+    } transport_rx_ack_event_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。
