@@ -67,20 +67,20 @@
 - [x] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
 - [x] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
 - [x] 7.9 Implement DMA error propagation into completion status.
-- [x] 7.10 Add DMA tests for single SGE, multi-SGE, 256 SGE, unaligned segments, 4KB boundary split, arbitration fairness, and error injection.
+- [x] 7.10 添加 DMA 测试，覆盖单 SGE、多 SGE、256 SGE、非对齐 segment、4KB 边界切分、仲裁公平性以及错误注入。
 
-## 8. Packet Parser and Packet Builder
+## 8. 数据包解析器与数据包构造器
 
-- [x] 8.1 Implement ingress packet parser for Ethernet, optional VLAN, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, and invariant CRC fields.
-- [x] 8.2 Implement ingress validation for EtherType, IP version, IHL, protocol, UDP port, BTH transport version, opcode, checksum, and packet length.
-- [x] 8.3 Implement payload extraction interface from parser to receive DMA and transport logic.
-- [x] 8.4 Implement packet builder for Ethernet, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, ACK, NAK, CNP, and payload frames.
-- [x] 8.5 Implement ICRC calculation or a clearly isolated placeholder with tests marking compatibility limitations.
-- [x] 8.6 Add packet tests for every supported opcode, invalid packet drop, header field extraction, header generation, payload alignment, and ICRC behavior.
+- [x] 8.1 实现入站数据包解析器，解析以太网、可选 VLAN、IPv4、UDP、BTH、RETH、AETH、DETH、ImmDt 以及不变 CRC 字段。
+- [x] 8.2 实现入站校验：EtherType、IP 版本、IHL、协议、UDP 端口、BTH 传输版本、操作码、校验和以及数据包长度。
+- [x] 8.3 实现解析器到接收 DMA 和传输逻辑的载荷提取接口。
+- [x] 8.4 实现数据包构造器，支持以太网、IPv4、UDP、BTH、RETH、AETH、DETH、ImmDt、ACK、NAK、CNP 以及载荷帧。
+- [x] 8.5 实现 ICRC 计算，或使用明确隔离的占位实现并附带标记兼容性限制的测试。
+- [x] 8.6 添加数据包测试，覆盖所有支持的操作码、无效数据包丢弃、头部字段提取、头部生成、载荷对齐以及 ICRC 行为。
 
-## 9. RoCEv2 Transport Engine
+## 9. RoCEv2 传输引擎
 
-- [x] 9.1 Implement RC send-side PSN allocation, outstanding packet tracking, ACK processing, retry timer, and retry exhaustion handling.
+- [x] 9.1 实现 RC 发送侧 PSN 分配、未完成数据包追踪、ACK 处理、重试定时器以及重试耗尽处理。
 - [ ] 9.2 Implement RC receive-side PSN validation, duplicate/replay drop, gap NAK generation, ACK coalescing, and RNR NAK generation.
 - [ ] 9.3 Implement RDMA Read request and response sequencing for RC QPs.
 - [ ] 9.4 Implement RDMA Write and Send immediate-data handling.
