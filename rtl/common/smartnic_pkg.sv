@@ -1770,6 +1770,57 @@ package smartnic_pkg;
         logic                   compatibility_limited; // 1 表示当前不是真实 ICRC，不能用于互操作。
     } packet_icrc_result_t;
 
+    parameter int RC_SEND_OUTSTANDING_DEPTH = 4; // 9.1 最小 RC send outstanding window 深度。
+    parameter int RC_SEND_RETRY_TIMER_W = 16; // retry timer 计数位宽。
+    parameter int RC_SEND_RETRY_COUNT_W = 8; // retry count 位宽。
+
+    typedef enum logic [4:0] {
+        RC_SEND_STATUS_OK              = 5'd0,
+        RC_SEND_STATUS_NOT_CONFIGURED  = 5'd1,
+        RC_SEND_STATUS_WINDOW_FULL     = 5'd2,
+        RC_SEND_STATUS_RETRY_EXHAUSTED = 5'd3,
+        RC_SEND_STATUS_ACK_MISS        = 5'd4
+    } rc_send_status_e;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // RC QP number。
+        logic [CQ_ID_W-1:0]     cqn;            // 后续 completion/debug 关联 CQ。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // SEND/RDMA_WRITE/RDMA_READ_REQ 等。
+        rc_send_status_e        status;         // 请求状态，正常为 OK。
+        logic [15:0]            error_code;     // 错误码，正常为 0。
+        logic [WR_ID_W-1:0]     wr_id;          // Work Request ID，completion/debug 使用。
+        logic [15:0]            payload_len;    // 本次 packet payload 长度。
+        logic                   solicited;      // BTH solicited event hint。
+        logic                   completion_required; // 是否需要后续 completion。
+        packet_build_req_t      build_req;      // 交给 packet builder 的 frame 构造请求。
+    } transport_tx_req_t;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // RC QP number。
+        logic [CQ_ID_W-1:0]     cqn;            // completion/debug 关联 CQ。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // RoCEv2 opcode。
+        rc_send_status_e        status;         // 发送侧状态。
+        logic [15:0]            error_code;     // 错误码，正常为 0。
+        logic [WR_ID_W-1:0]     wr_id;          // Work Request ID。
+        logic [PSN_W-1:0]       psn;            // 分配给 packet 的 PSN。
+        logic                   is_retry;       // 1 表示 retry 重新发包。
+        logic [RC_SEND_RETRY_COUNT_W-1:0] retry_count; // 当前剩余 retry 次数。
+        packet_build_req_t      build_req;      // 已写入 PSN 的 packet builder 请求。
+    } transport_rc_packet_t;
+
+    typedef struct packed {
+        logic [QP_ID_W-1:0]     qpn;            // ACK 所属 QPN。
+        logic [VF_ID_W-1:0]     owner_function; // ACK 所属 function。
+        logic [PSN_W-1:0]       ack_psn;        // 累积 ACK 到该 PSN。
+        logic                   retry_hint;     // NAK/retry hint 预留；9.1 仅作为 retry 触发提示。
+    } transport_ack_event_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。

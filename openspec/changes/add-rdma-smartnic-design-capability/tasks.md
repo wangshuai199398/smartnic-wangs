@@ -80,7 +80,7 @@
 
 ## 9. RoCEv2 Transport Engine
 
-- [ ] 9.1 Implement RC send-side PSN allocation, outstanding packet tracking, ACK processing, retry timer, and retry exhaustion handling.
+- [x] 9.1 Implement RC send-side PSN allocation, outstanding packet tracking, ACK processing, retry timer, and retry exhaustion handling.
 - [ ] 9.2 Implement RC receive-side PSN validation, duplicate/replay drop, gap NAK generation, ACK coalescing, and RNR NAK generation.
 - [ ] 9.3 Implement RDMA Read request and response sequencing for RC QPs.
 - [ ] 9.4 Implement RDMA Write and Send immediate-data handling.

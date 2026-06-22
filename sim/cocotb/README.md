@@ -1,6 +1,6 @@
 # Cocotb 模块级单元测试
 
-本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager、CQ manager、MR manager 和 DMA dispatcher 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、RoCEv2 transport 或主机内存模型。
+本目录存放 RDMA SmartNIC 的 Cocotb 模块级测试。当前阶段覆盖 PCIe endpoint/control-plane、Doorbell path、QP manager、CQ manager、MR manager、DMA dispatcher、packet processing 和 transport RC send-side 的最小行为，不模拟完整 PCIe 链路、TLP credit、DMA completion、完整 RoCEv2 transport 或主机内存模型。
 
 ## 测试文件
 
@@ -52,6 +52,7 @@
 | `test_roce_packet_builder.py` | `rtl/packet/roce_packet_builder.sv` | Ethernet/IPv4/UDP/BTH frame 构造、RETH、AETH/ACK、DETH、ImmDt、CNP、payload、unsupported opcode、multi-beat stub、backpressure |
 | `test_roce_icrc_placeholder.py` | `rtl/packet/roce_icrc_placeholder.sv` | ICRC placeholder 透传、RX unchecked 标记、compatibility_limited 标志、backpressure |
 | `test_roce_packet_stage8.py` | 第 8 阶段 packet mock integration | 全部支持 opcode、invalid packet drop、header extraction/generation、payload alignment、ICRC placeholder known limitation |
+| `test_rc_send_engine.py` | `rtl/transport/rc_send_engine.sv` | RC send-side PSN allocation、outstanding tracking、ACK clear、retry timer、retry exhausted QP error request |
 
 ## 运行方式
 
@@ -65,6 +66,7 @@ make cq-test
 make mr-test
 make dma-test
 make packet-test
+make transport-test
 ```
 
 或直接进入本目录运行：
@@ -77,6 +79,7 @@ make -C sim/cocotb cq-tests
 make -C sim/cocotb mr-tests
 make -C sim/cocotb dma-tests
 make -C sim/cocotb packet-tests
+make -C sim/cocotb transport-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -125,6 +128,7 @@ make -C sim/cocotb test-roce-payload-extractor
 make -C sim/cocotb test-roce-packet-builder
 make -C sim/cocotb test-roce-icrc-placeholder
 make -C sim/cocotb test-roce-packet-stage8
+make -C sim/cocotb test-rc-send-engine
 ```
 
 ## 当前限制
@@ -161,3 +165,4 @@ make -C sim/cocotb test-roce-packet-stage8
 - Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
+- RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
