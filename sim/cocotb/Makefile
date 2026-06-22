@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -97,6 +97,17 @@ dma-tests:
 		$(MAKE) test-dma-host-read-path; \
 		$(MAKE) test-dma-host-write-path; \
 		$(MAKE) test-dma-error-propagation; \
+		$(MAKE) test-dma-integration; \
+	fi
+
+packet-tests:
+	@if ! command -v cocotb-config >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 cocotb，跳过 Packet parser 单元测试。"; \
+	elif ! command -v verilator >/dev/null 2>&1; then \
+		echo "[cocotb] 未安装 Verilator，跳过 Packet parser 单元测试。"; \
+	else \
+		$(MAKE) test-roce-packet-parser; \
+		$(MAKE) test-roce-ingress-validator; \
 	fi
 
 test-pcie-cfg:
@@ -297,6 +308,20 @@ test-dma-host-write-path:
 test-dma-error-propagation:
 	$(MAKE) TOPLEVEL=dma_error_propagation MODULE=test_dma_error_propagation \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/dma/dma_error_propagation.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-dma-integration:
+	@echo "[dma-integration] Running DMA mock-based integration tests..."
+	python3 test_dma_integration.py
+
+test-roce-packet-parser:
+	$(MAKE) TOPLEVEL=roce_packet_parser MODULE=test_roce_packet_parser \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/packet/roce_packet_parser.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-roce-ingress-validator:
+	$(MAKE) TOPLEVEL=roce_ingress_validator MODULE=test_roce_ingress_validator \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/packet/roce_ingress_validator.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

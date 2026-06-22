@@ -46,6 +46,8 @@
 | `test_dma_host_read_path.py` | `rtl/dma/dma_host_read_path.sv` | Send/RDMA Write protected segment 到 PCIe read request、read response 到 payload stream、tag/length/error 检查、payload backpressure、refcount release |
 | `test_dma_host_write_path.py` | `rtl/dma/dma_host_write_path.sv` | Recv/RDMA Read response protected segment 和 payload stream 到 PCIe write request、write completion 到 done、tag/error 检查、write backpressure、refcount release |
 | `test_dma_error_propagation.py` | `rtl/dma/dma_error_propagation.sv` | DMA error source 到 completion status 映射、fatal QP error request、completion backpressure、多 source 优先级 |
+| `test_roce_packet_parser.py` | `rtl/packet/roce_packet_parser.sv` | Ethernet/单层 VLAN/IPv4/UDP/BTH/RETH 字段提取、metadata 透传、NEED_MORE_DATA 状态 |
+| `test_roce_ingress_validator.py` | `rtl/packet/roce_ingress_validator.sv` | EtherType、IP version/IHL/protocol、UDP port、BTH version、opcode、checksum、packet length 校验和 drop/accept ready/valid |
 
 ## 运行方式
 
@@ -58,6 +60,7 @@ make qp-test
 make cq-test
 make mr-test
 make dma-test
+make packet-test
 ```
 
 或直接进入本目录运行：
@@ -69,6 +72,7 @@ make -C sim/cocotb qp-tests
 make -C sim/cocotb cq-tests
 make -C sim/cocotb mr-tests
 make -C sim/cocotb dma-tests
+make -C sim/cocotb packet-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -111,6 +115,8 @@ make -C sim/cocotb test-dma-segment-splitter
 make -C sim/cocotb test-dma-arbiter
 make -C sim/cocotb test-dma-host-write-path
 make -C sim/cocotb test-dma-error-propagation
+make -C sim/cocotb test-roce-packet-parser
+make -C sim/cocotb test-roce-ingress-validator
 ```
 
 ## 当前限制
@@ -141,3 +147,5 @@ make -C sim/cocotb test-dma-error-propagation
 - DMA arbiter 测试只验证多 source request 到单个 grant 的调度策略和 starvation guard，不执行真实 host read/write/fetch，也不做 completion error propagation。
 - DMA host write path 测试只验证 protected segment 和 payload stream 到 PCIe write request 的转换、write completion、错误输出和 refcount release，不实现真实 PCIe memory write、跨 segment 拼接、PMTU/4KB split 或 completion error propagation。
 - DMA error propagation 测试只验证 DMA 子模块错误到 completion status / QP error request 的映射，不实现 retry engine、remote error packet、RoCEv2 NAK 或 async event queue。
+- Packet parser 测试只验证 8.1 的首个 512-bit beat 字段提取和 metadata 输出，不实现 8.2 ingress validation、8.3 payload extraction、8.4 packet builder 或 8.5 ICRC 校验。
+- Ingress validator 测试只验证 8.2 的 metadata 合法性裁决和 drop/accept ready/valid，不实现真实 checksum 计算器、payload extraction、packet builder 或 transport/QP 状态机。

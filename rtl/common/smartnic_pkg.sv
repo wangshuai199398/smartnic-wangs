@@ -1594,6 +1594,91 @@ package smartnic_pkg;
         logic [QUEUE_IDX_W-1:0]      consumer_index;         // 软件观察到的 CQ consumer index。
     } cq_arm_doorbell_payload_t;
 
+    // RoCEv2 packet parser 共享常量和元数据格式。
+    localparam logic [15:0] ETH_TYPE_IPV4     = 16'h0800; // IPv4 EtherType。
+    localparam logic [15:0] ETH_TYPE_VLAN     = 16'h8100; // 802.1Q VLAN EtherType。
+    localparam logic [15:0] ETH_TYPE_QINQ     = 16'h88a8; // 802.1ad QinQ EtherType，本阶段只识别一层 VLAN。
+    localparam logic [7:0]  IP_PROTO_UDP      = 8'h11;   // IPv4 UDP protocol number。
+    localparam logic [15:0] ROCEV2_UDP_PORT   = 16'd4791; // RoCEv2 UDP destination port。
+    localparam logic [3:0]  BTH_TRANSPORT_VER = 4'h0;    // RoCEv2 BTH transport version。
+    localparam logic [3:0]  IPV4_VERSION      = 4'h4;    // IPv4 version 字段。
+    localparam logic [3:0]  IPV4_MIN_IHL      = 4'h5;    // 当前最小实现只支持无 IPv4 option 的 20B header。
+
+    typedef enum logic [7:0] {
+        ROCE_OPCODE_SEND_ONLY       = 8'h04,
+        ROCE_OPCODE_SEND_ONLY_IMM   = 8'h05,
+        ROCE_OPCODE_RDMA_WRITE_ONLY = 8'h0a,
+        ROCE_OPCODE_RDMA_READ_REQ   = 8'h0c,
+        ROCE_OPCODE_RDMA_READ_RESP  = 8'h10,
+        ROCE_OPCODE_ACK             = 8'h11,
+        ROCE_OPCODE_CNP             = 8'h81,
+        ROCE_OPCODE_UD_SEND_ONLY    = 8'h64
+    } roce_opcode_e;
+
+    typedef enum logic [3:0] {
+        PKT_PARSE_STATUS_OK                 = 4'd0,
+        PKT_PARSE_STATUS_NEED_MORE_DATA     = 4'd1,
+        PKT_PARSE_STATUS_SHORT_FRAME        = 4'd2,
+        PKT_PARSE_STATUS_UNSUPPORTED_LAYOUT = 4'd3
+    } packet_parse_status_e;
+
+    typedef enum logic [4:0] {
+        PKT_VALIDATION_OK              = 5'd0,
+        PKT_VALIDATION_ERR_PARSE       = 5'd1,
+        PKT_VALIDATION_ERR_ETHERTYPE   = 5'd2,
+        PKT_VALIDATION_ERR_IP_VERSION  = 5'd3,
+        PKT_VALIDATION_ERR_IHL         = 5'd4,
+        PKT_VALIDATION_ERR_PROTOCOL    = 5'd5,
+        PKT_VALIDATION_ERR_UDP_PORT    = 5'd6,
+        PKT_VALIDATION_ERR_BTH_VERSION = 5'd7,
+        PKT_VALIDATION_ERR_OPCODE      = 5'd8,
+        PKT_VALIDATION_ERR_CHECKSUM    = 5'd9,
+        PKT_VALIDATION_ERR_LENGTH      = 5'd10
+    } packet_validation_error_e;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID，透传给后续 transport/completion/debug。
+        logic [QP_ID_W-1:0]     qpn;            // 上游关联的本地 QPN，入站场景可由后续 QP lookup 覆盖。
+        logic [CQ_ID_W-1:0]     cqn;            // 上游关联的 CQN，后续 completion path 使用。
+        logic [VF_ID_W-1:0]     owner_function; // 该 packet metadata 所属 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // 该 packet metadata 所属 Protection Domain。
+        roce_opcode_e           opcode;         // BTH opcode。
+        packet_parse_status_e   status;         // 8.1 只表示结构性解析状态，协议合法性留给 8.2。
+        logic [15:0]            frame_len;      // 原始帧长度，供 8.2 packet length 校验。
+        logic [15:0]            ethertype;      // 解出的一层或 VLAN 内层 EtherType。
+        logic                   has_vlan;       // 是否识别到一层 VLAN header。
+        logic [15:0]            vlan_tci;       // VLAN TCI，未带 VLAN 时为 0。
+        logic [3:0]             ip_version;     // IPv4 version 字段。
+        logic [3:0]             ip_ihl;         // IPv4 IHL，当前 validator 只接受 5。
+        logic [15:0]            ip_total_length;// IPv4 total length。
+        logic [7:0]             ip_protocol;    // IPv4 protocol，应为 UDP。
+        logic [15:0]            ip_checksum;    // IPv4 header checksum 原始字段；校验结果由外部 checksum checker 输入。
+        logic [31:0]            ipv4_src;       // IPv4 源地址。
+        logic [31:0]            ipv4_dst;       // IPv4 目的地址。
+        logic [15:0]            udp_src_port;   // UDP 源端口。
+        logic [15:0]            udp_dst_port;   // UDP 目的端口。
+        logic [15:0]            udp_length;     // UDP length 字段。
+        logic [15:0]            udp_checksum;   // UDP checksum 原始字段；checksum 计算留给独立 checker。
+        logic [3:0]             bth_transport_version; // BTH transport version。
+        logic [PKEY_W-1:0]      pkey;           // BTH P_Key。
+        logic [QP_ID_W-1:0]     dest_qpn;       // BTH destination QPN。
+        logic [PSN_W-1:0]       psn;            // BTH packet sequence number。
+        logic                   has_reth;       // opcode 是否携带 RETH。
+        logic [ADDR_W-1:0]      remote_va;      // RETH remote virtual address。
+        logic [KEY_W-1:0]       rkey;           // RETH remote key。
+        logic [DMA_LEN_W-1:0]   dma_length;     // RETH DMA length。
+        logic                   has_aeth;       // opcode 是否携带 AETH。
+        logic [31:0]            aeth;           // AETH 原始字段。
+        logic                   has_deth;       // UD opcode 是否携带 DETH。
+        logic [QKEY_W-1:0]      qkey;           // DETH Q_Key。
+        logic [QP_ID_W-1:0]     src_qpn;        // DETH source QPN。
+        logic                   has_imm;        // opcode 是否携带 immediate data。
+        logic [31:0]            imm_data;       // Immediate data。
+        logic [31:0]            icrc;           // invariant CRC 字段的原始值；8.1 不计算/校验。
+        logic [15:0]            payload_offset; // payload 在 frame 中的字节偏移。
+        logic [15:0]            payload_len;    // payload 字节数，已扣除尾部 ICRC。
+    } packet_meta_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。

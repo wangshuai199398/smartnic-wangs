@@ -67,12 +67,12 @@
 - [x] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
 - [x] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
 - [x] 7.9 Implement DMA error propagation into completion status.
-- [ ] 7.10 Add DMA tests for single SGE, multi-SGE, 256 SGE, unaligned segments, 4KB boundary split, arbitration fairness, and error injection.
+- [x] 7.10 Add DMA tests for single SGE, multi-SGE, 256 SGE, unaligned segments, 4KB boundary split, arbitration fairness, and error injection.
 
 ## 8. Packet Parser and Packet Builder
 
-- [ ] 8.1 Implement ingress packet parser for Ethernet, optional VLAN, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, and invariant CRC fields.
-- [ ] 8.2 Implement ingress validation for EtherType, IP version, IHL, protocol, UDP port, BTH transport version, opcode, checksum, and packet length.
+- [x] 8.1 Implement ingress packet parser for Ethernet, optional VLAN, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, and invariant CRC fields.
+- [x] 8.2 Implement ingress validation for EtherType, IP version, IHL, protocol, UDP port, BTH transport version, opcode, checksum, and packet length.
 - [ ] 8.3 Implement payload extraction interface from parser to receive DMA and transport logic.
 - [ ] 8.4 Implement packet builder for Ethernet, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, ACK, NAK, CNP, and payload frames.
 - [ ] 8.5 Implement ICRC calculation or a clearly isolated placeholder with tests marking compatibility limitations.
