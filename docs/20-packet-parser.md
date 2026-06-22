@@ -202,6 +202,32 @@ result_valid / result_ready
 - 不能证明 packet builder 输出满足 IBTA/RoCEv2 ICRC 要求。
 - 8.6 之后的完整协议测试应把该限制标为 known limitation，直到真实 ICRC 计算器替换 placeholder。
 
+## 8.6 Packet Test Matrix
+
+第 8 阶段的测试分两层：
+
+| 测试 | 类型 | 覆盖点 |
+| --- | --- | --- |
+| `test_roce_packet_parser.py` | Cocotb module test | header field extraction、VLAN、RETH、NEED_MORE_DATA。 |
+| `test_roce_ingress_validator.py` | Cocotb module test | invalid packet drop：EtherType、IP version/IHL/protocol、UDP port、BTH version、opcode、checksum、length。 |
+| `test_roce_payload_extractor.py` | Cocotb module test | payload alignment、metadata 透传、零 payload、multi-beat stub error。 |
+| `test_roce_packet_builder.py` | Cocotb module test | Ethernet/IPv4/UDP/BTH/RETH/AETH/DETH/ImmDt/CNP/header generation、payload frame、backpressure。 |
+| `test_roce_icrc_placeholder.py` | Cocotb module test | ICRC placeholder、RX unchecked、compatibility limitation 标记。 |
+| `test_roce_packet_stage8.py` | Python mock integration | 全部支持 opcode、invalid drop matrix、header extraction/generation、payload alignment、ICRC known limitation。 |
+
+`test_roce_packet_stage8.py` 是 8.6 的矩阵式补充测试。它不实例化完整 RTL pipeline，而是用与当前接口一致的 mock 数据流把第 8 阶段的行为串起来：
+
+```text
+mock packet
+  -> parse_headers
+  -> validate_packet
+  -> extract_payload
+  -> build_headers
+  -> icrc_placeholder
+```
+
+这样做的目的是让任务 8.6 的覆盖项在没有真实 MAC、真实 transport、第 9 阶段 RC/UD 状态机和真实 ICRC 的情况下也可执行、可检查。
+
 ## 当前 Stub / TODO
 
 - 当前 payload extractor 只支持首个 512-bit beat 内的 payload；完整多 beat payload reassembly 仍是 TODO。
@@ -209,4 +235,5 @@ result_valid / result_ready
 - VLAN 情况下 RETH length 可能落在下一 beat，当前只提取 remote VA 和 rkey。
 - checksum 当前通过 `checksum_valid/checksum_ok` stub 接口接入；真实 IPv4/UDP checksum 计算器后续独立实现。
 - ICRC 当前使用隔离 placeholder，不计算真实 invariant CRC。
+- 8.6 的矩阵测试是 mock integration，不证明完整 RTL pipeline 或真实网络互操作。
 - 不实例化真实 MAC，也不连接第 9 阶段 transport engine；测试使用 Cocotb 直接驱动 frame 和 metadata 接口。

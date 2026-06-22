@@ -51,6 +51,7 @@
 | `test_roce_payload_extractor.py` | `rtl/packet/roce_payload_extractor.sv` | validated metadata + frame beat 到 transport metadata 和 receive-DMA payload stream 的转换、零 payload、multi-beat stub error、backpressure |
 | `test_roce_packet_builder.py` | `rtl/packet/roce_packet_builder.sv` | Ethernet/IPv4/UDP/BTH frame 构造、RETH、AETH/ACK、DETH、ImmDt、CNP、payload、unsupported opcode、multi-beat stub、backpressure |
 | `test_roce_icrc_placeholder.py` | `rtl/packet/roce_icrc_placeholder.sv` | ICRC placeholder 透传、RX unchecked 标记、compatibility_limited 标志、backpressure |
+| `test_roce_packet_stage8.py` | 第 8 阶段 packet mock integration | 全部支持 opcode、invalid packet drop、header extraction/generation、payload alignment、ICRC placeholder known limitation |
 
 ## 运行方式
 
@@ -123,6 +124,7 @@ make -C sim/cocotb test-roce-ingress-validator
 make -C sim/cocotb test-roce-payload-extractor
 make -C sim/cocotb test-roce-packet-builder
 make -C sim/cocotb test-roce-icrc-placeholder
+make -C sim/cocotb test-roce-packet-stage8
 ```
 
 ## 当前限制
@@ -158,3 +160,4 @@ make -C sim/cocotb test-roce-icrc-placeholder
 - Payload extractor 测试只验证 8.3 的接口转换，不实现完整多 beat payload reassembly、真实 receive DMA 写入、第 9 阶段 transport 状态机或 packet builder。
 - Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
+- Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
