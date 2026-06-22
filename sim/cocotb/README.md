@@ -49,6 +49,7 @@
 | `test_roce_packet_parser.py` | `rtl/packet/roce_packet_parser.sv` | Ethernet/单层 VLAN/IPv4/UDP/BTH/RETH 字段提取、metadata 透传、NEED_MORE_DATA 状态 |
 | `test_roce_ingress_validator.py` | `rtl/packet/roce_ingress_validator.sv` | EtherType、IP version/IHL/protocol、UDP port、BTH version、opcode、checksum、packet length 校验和 drop/accept ready/valid |
 | `test_roce_payload_extractor.py` | `rtl/packet/roce_payload_extractor.sv` | validated metadata + frame beat 到 transport metadata 和 receive-DMA payload stream 的转换、零 payload、multi-beat stub error、backpressure |
+| `test_roce_packet_builder.py` | `rtl/packet/roce_packet_builder.sv` | Ethernet/IPv4/UDP/BTH frame 构造、RETH、AETH/ACK、DETH、ImmDt、CNP、payload、unsupported opcode、multi-beat stub、backpressure |
 
 ## 运行方式
 
@@ -119,6 +120,7 @@ make -C sim/cocotb test-dma-error-propagation
 make -C sim/cocotb test-roce-packet-parser
 make -C sim/cocotb test-roce-ingress-validator
 make -C sim/cocotb test-roce-payload-extractor
+make -C sim/cocotb test-roce-packet-builder
 ```
 
 ## 当前限制
@@ -152,3 +154,4 @@ make -C sim/cocotb test-roce-payload-extractor
 - Packet parser 测试只验证 8.1 的首个 512-bit beat 字段提取和 metadata 输出，不实现 8.2 ingress validation、8.3 payload extraction、8.4 packet builder 或 8.5 ICRC 校验。
 - Ingress validator 测试只验证 8.2 的 metadata 合法性裁决和 drop/accept ready/valid，不实现真实 checksum 计算器、payload extraction、packet builder 或 transport/QP 状态机。
 - Payload extractor 测试只验证 8.3 的接口转换，不实现完整多 beat payload reassembly、真实 receive DMA 写入、第 9 阶段 transport 状态机或 packet builder。
+- Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。

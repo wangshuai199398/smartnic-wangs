@@ -1644,6 +1644,13 @@ package smartnic_pkg;
         PKT_PAYLOAD_ERR_FRAME_NOT_LAST    = 5'd4
     } packet_payload_error_e;
 
+    typedef enum logic [4:0] {
+        PKT_BUILD_OK                    = 5'd0,
+        PKT_BUILD_ERR_UNSUPPORTED       = 5'd1,
+        PKT_BUILD_ERR_LENGTH            = 5'd2,
+        PKT_BUILD_ERR_MULTI_BEAT_STUB   = 5'd3
+    } packet_build_error_e;
+
     typedef struct packed {
         logic [15:0]            desc_id;        // 来源 descriptor ID，透传给后续 transport/completion/debug。
         logic [QP_ID_W-1:0]     qpn;            // 上游关联的本地 QPN，入站场景可由后续 QP lookup 覆盖。
@@ -1710,6 +1717,39 @@ package smartnic_pkg;
         logic [QP_ID_W-1:0]     dest_qpn;       // BTH destination QPN。
         logic [PSN_W-1:0]       psn;            // BTH PSN。
     } packet_payload_stream_t;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // 本地 QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // completion/debug 关联 CQN。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // 需要构造的 RoCEv2 opcode。
+        packet_build_error_e    status;         // packet builder 状态。
+        logic [15:0]            error_code;     // builder 错误码，成功为 0。
+        logic [47:0]            dst_mac;        // Ethernet destination MAC。
+        logic [47:0]            src_mac;        // Ethernet source MAC。
+        logic                   has_vlan;       // 是否插入单层 VLAN。
+        logic [15:0]            vlan_tci;       // VLAN TCI。
+        logic [31:0]            src_ipv4;       // IPv4 source。
+        logic [31:0]            dst_ipv4;       // IPv4 destination。
+        logic [15:0]            udp_src_port;   // UDP source port。
+        logic [15:0]            udp_dst_port;   // UDP destination port，通常为 4791。
+        logic [PKEY_W-1:0]      pkey;           // BTH P_Key。
+        logic [QP_ID_W-1:0]     dest_qpn;       // BTH destination QPN。
+        logic [QP_ID_W-1:0]     src_qpn;        // DETH source QPN。
+        logic [PSN_W-1:0]       psn;            // BTH PSN。
+        logic [ADDR_W-1:0]      remote_va;      // RETH remote virtual address。
+        logic [KEY_W-1:0]       rkey;           // RETH remote key。
+        logic [DMA_LEN_W-1:0]   dma_length;     // RETH DMA length。
+        logic [31:0]            aeth;           // AETH / ACK / NAK 原始字段。
+        logic [QKEY_W-1:0]      qkey;           // DETH Q_Key。
+        logic                   has_imm;        // 是否构造 ImmDt。
+        logic [31:0]            imm_data;       // Immediate data。
+        logic [511:0]           payload_data;   // 单 beat payload 数据。
+        logic [15:0]            payload_len;    // payload 长度。
+        logic [31:0]            icrc_placeholder; // 8.4 占位 ICRC，8.5 替换为真实计算。
+    } packet_build_req_t;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。

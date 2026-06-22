@@ -1,6 +1,6 @@
-# 8.1 RoCEv2 入站包解析器
+# RoCEv2 Packet Processing
 
-本阶段只实现 `roce_packet_parser.sv` 的最小可验证解析框架。它的位置在 MAC RX 之后、transport/RQ/DMA 之前：
+本阶段覆盖第 8 阶段的包处理子模块。RX 方向已经包含 parser、validator 和 payload extractor；8.4 新增 TX 方向的 packet builder。
 
 ```text
 MAC RX frame
@@ -9,6 +9,15 @@ MAC RX frame
   -> roce_ingress_validator
   -> roce_payload_extractor
   -> transport metadata + receive DMA payload stream
+```
+
+TX 方向：
+
+```text
+transport/DMA TX request
+  -> roce_packet_builder
+  -> Ethernet/IPv4/UDP/RoCEv2 frame
+  -> 后续 MAC TX
 ```
 
 ## 解析范围
@@ -123,10 +132,51 @@ frame beat:         frame_valid / frame_ready / frame_data / frame_len / frame_l
 
 为什么这样切分：8.3 的目标是把 parser/validator 结果连接到 receive DMA 和 transport 逻辑，而不是实现完整 RoCEv2 transport 状态机。真正的多 beat payload reassembly、PMTU payload 分段、RQ/DMA 写入和 RC/UD 语义会在后续任务中继续接上。
 
+## 8.4 Packet Builder
+
+`rtl/packet/roce_packet_builder.sv` 接收 `packet_build_req_t`，输出单个 512-bit frame beat：
+
+```text
+build_req_valid / build_req_ready / packet_build_req_t
+  -> frame_valid / frame_ready / frame_data / frame_len / frame_last
+```
+
+支持的构造内容：
+
+| 层级 | 当前行为 |
+| --- | --- |
+| Ethernet | 写入 dst/src MAC，支持无 VLAN 或单层 VLAN。 |
+| IPv4 | 写入 version/IHL、total length、UDP protocol、src/dst IPv4。 |
+| UDP | 写入 source port 和 RoCEv2 destination port。 |
+| BTH | 写入 opcode、P_Key、destination QPN、PSN。 |
+| RETH | 用于 RDMA Write 和 RDMA Read Request，写入 remote VA、rkey、DMA length。 |
+| AETH | 用于 ACK 和 Read Response 的最小 AETH 字段。 |
+| DETH | 用于 UD Send，写入 Q_Key 和 source QPN。 |
+| ImmDt | 用于 Send with Immediate。 |
+| CNP | 生成 CNP opcode 的最小 header frame。 |
+| Payload | 支持 payload 完整落在单个 512-bit beat 内。 |
+
+当前 builder 会保留：
+
+- `desc_id`
+- `qpn`
+- `cqn`
+- `owner_function`
+- `pd_id`
+- `opcode`
+- `status/error_code`
+
+如果请求无法在单 beat 内输出，会返回 `PKT_BUILD_ERR_MULTI_BEAT_STUB`。不支持 opcode 返回 `PKT_BUILD_ERR_UNSUPPORTED`。
+
+### ICRC 边界
+
+8.4 不实现真实 invariant CRC。`packet_build_req_t.icrc_placeholder` 会透传到 frame 尾部，作为后续 8.5 的占位接口。这样 packet builder 的 header layout 和 ready/valid 行为可以先被验证，而不会把 CRC 计算混进本阶段。
+
 ## 当前 Stub / TODO
 
 - 当前 payload extractor 只支持首个 512-bit beat 内的 payload；完整多 beat payload reassembly 仍是 TODO。
+- 当前 packet builder 只支持单个 512-bit beat 输出；多 beat packet segmentation 仍是 TODO。
 - VLAN 情况下 RETH length 可能落在下一 beat，当前只提取 remote VA 和 rkey。
 - checksum 当前通过 `checksum_valid/checksum_ok` stub 接口接入；真实 IPv4/UDP/ICRC 计算器后续独立实现。
-- ICRC 只作为原始字段输出，不计算；完整 ICRC 属于 8.5。
+- ICRC RX 侧只作为原始字段输出，TX 侧只透传 placeholder；完整 ICRC 属于 8.5。
 - 不实例化真实 MAC，也不连接第 9 阶段 transport engine；测试使用 Cocotb 直接驱动 frame 和 metadata 接口。
