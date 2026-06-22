@@ -1636,6 +1636,14 @@ package smartnic_pkg;
         PKT_VALIDATION_ERR_LENGTH      = 5'd10
     } packet_validation_error_e;
 
+    typedef enum logic [4:0] {
+        PKT_PAYLOAD_OK                    = 5'd0,
+        PKT_PAYLOAD_ERR_META_STATUS       = 5'd1,
+        PKT_PAYLOAD_ERR_LENGTH            = 5'd2,
+        PKT_PAYLOAD_ERR_MULTI_BEAT_STUB   = 5'd3,
+        PKT_PAYLOAD_ERR_FRAME_NOT_LAST    = 5'd4
+    } packet_payload_error_e;
+
     typedef struct packed {
         logic [15:0]            desc_id;        // 来源 descriptor ID，透传给后续 transport/completion/debug。
         logic [QP_ID_W-1:0]     qpn;            // 上游关联的本地 QPN，入站场景可由后续 QP lookup 覆盖。
@@ -1678,6 +1686,30 @@ package smartnic_pkg;
         logic [15:0]            payload_offset; // payload 在 frame 中的字节偏移。
         logic [15:0]            payload_len;    // payload 字节数，已扣除尾部 ICRC。
     } packet_meta_t;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID，供 DMA/completion/debug 关联。
+        logic [QP_ID_W-1:0]     qpn;            // 本地关联 QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // 后续 completion 使用的 CQN。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // RoCEv2 opcode。
+        packet_payload_error_e  status;         // payload extraction 状态。
+        logic [15:0]            error_code;     // payload extraction 错误码，成功为 0。
+        logic [511:0]           data;           // 当前 beat 对齐后的 payload 数据。
+        logic [15:0]            payload_len;    // 本次输出 payload 总长度。
+        logic [15:0]            valid_bytes;    // 当前 data 中有效 payload 字节数。
+        logic [15:0]            byte_offset;    // 当前 payload beat 在整个 packet payload 中的偏移。
+        logic                   first;          // 当前 beat 是否为 payload 第一拍。
+        logic                   last;           // 当前 beat 是否为 payload 最后一拍。
+        logic                   has_imm;        // 是否携带 immediate data。
+        logic [31:0]            imm_data;       // immediate data。
+        logic [ADDR_W-1:0]      remote_va;      // RETH remote VA，供 transport/DMA 后续使用。
+        logic [KEY_W-1:0]       rkey;           // RETH rkey。
+        logic [DMA_LEN_W-1:0]   dma_length;     // RETH DMA length。
+        logic [QP_ID_W-1:0]     dest_qpn;       // BTH destination QPN。
+        logic [PSN_W-1:0]       psn;            // BTH PSN。
+    } packet_payload_stream_t;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。

@@ -48,6 +48,7 @@
 | `test_dma_error_propagation.py` | `rtl/dma/dma_error_propagation.sv` | DMA error source 到 completion status 映射、fatal QP error request、completion backpressure、多 source 优先级 |
 | `test_roce_packet_parser.py` | `rtl/packet/roce_packet_parser.sv` | Ethernet/单层 VLAN/IPv4/UDP/BTH/RETH 字段提取、metadata 透传、NEED_MORE_DATA 状态 |
 | `test_roce_ingress_validator.py` | `rtl/packet/roce_ingress_validator.sv` | EtherType、IP version/IHL/protocol、UDP port、BTH version、opcode、checksum、packet length 校验和 drop/accept ready/valid |
+| `test_roce_payload_extractor.py` | `rtl/packet/roce_payload_extractor.sv` | validated metadata + frame beat 到 transport metadata 和 receive-DMA payload stream 的转换、零 payload、multi-beat stub error、backpressure |
 
 ## 运行方式
 
@@ -117,6 +118,7 @@ make -C sim/cocotb test-dma-host-write-path
 make -C sim/cocotb test-dma-error-propagation
 make -C sim/cocotb test-roce-packet-parser
 make -C sim/cocotb test-roce-ingress-validator
+make -C sim/cocotb test-roce-payload-extractor
 ```
 
 ## 当前限制
@@ -149,3 +151,4 @@ make -C sim/cocotb test-roce-ingress-validator
 - DMA error propagation 测试只验证 DMA 子模块错误到 completion status / QP error request 的映射，不实现 retry engine、remote error packet、RoCEv2 NAK 或 async event queue。
 - Packet parser 测试只验证 8.1 的首个 512-bit beat 字段提取和 metadata 输出，不实现 8.2 ingress validation、8.3 payload extraction、8.4 packet builder 或 8.5 ICRC 校验。
 - Ingress validator 测试只验证 8.2 的 metadata 合法性裁决和 drop/accept ready/valid，不实现真实 checksum 计算器、payload extraction、packet builder 或 transport/QP 状态机。
+- Payload extractor 测试只验证 8.3 的接口转换，不实现完整多 beat payload reassembly、真实 receive DMA 写入、第 9 阶段 transport 状态机或 packet builder。

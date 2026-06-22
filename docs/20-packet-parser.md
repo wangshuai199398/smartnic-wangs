@@ -7,7 +7,8 @@ MAC RX frame
   -> roce_packet_parser
   -> packet metadata
   -> roce_ingress_validator
-  -> 后续 8.3 payload extraction / transport RX / receive DMA
+  -> roce_payload_extractor
+  -> transport metadata + receive DMA payload stream
 ```
 
 ## 解析范围
@@ -78,10 +79,54 @@ parser 当前只设置结构性状态：
 
 validator 则把非 OK parser status 统一转换为 `PKT_VALIDATION_ERR_PARSE`。
 
+## 8.3 Payload Extraction Interface
+
+`rtl/packet/roce_payload_extractor.sv` 接收两类同步输入：
+
+```text
+validated metadata: meta_valid / meta_ready / packet_meta_t
+frame beat:         frame_valid / frame_ready / frame_data / frame_len / frame_last
+```
+
+它输出两路接口：
+
+| 输出 | 作用 |
+| --- | --- |
+| `transport_meta_valid / transport_meta_ready / transport_meta` | 把已通过 8.2 校验的 `packet_meta_t` 传给后续 transport RX。 |
+| `rx_payload_valid / rx_payload_ready / packet_payload_stream_t` | 把 payload 对齐成 receive DMA/RQ path 可消费的 payload stream。 |
+
+`packet_payload_stream_t` 保留这些跨模块调试和 completion 关联字段：
+
+- `desc_id`
+- `qpn`
+- `cqn`
+- `owner_function`
+- `pd_id`
+- `opcode`
+- `status/error_code`
+- `payload_len`
+- `valid_bytes`
+- `byte_offset`
+- `first/last`
+- `imm_data`
+- `remote_va/rkey/dma_length`
+- `dest_qpn/psn`
+
+当前最小版本只支持 payload 完整落在首个 512-bit beat 内的包。若 payload 跨 beat 或 `frame_last=0`，模块通过 `extract_error_valid` 输出错误：
+
+| 错误 | 含义 |
+| --- | --- |
+| `PKT_PAYLOAD_ERR_META_STATUS` | 输入 metadata 不是 parser OK 状态。 |
+| `PKT_PAYLOAD_ERR_LENGTH` | frame length、payload offset、payload length 或 ICRC 范围不自洽。 |
+| `PKT_PAYLOAD_ERR_MULTI_BEAT_STUB` | payload 超出首个 512-bit beat，当前阶段不重组多 beat。 |
+| `PKT_PAYLOAD_ERR_FRAME_NOT_LAST` | 当前 frame 还有后续 beat，最小实现先拒绝。 |
+
+为什么这样切分：8.3 的目标是把 parser/validator 结果连接到 receive DMA 和 transport 逻辑，而不是实现完整 RoCEv2 transport 状态机。真正的多 beat payload reassembly、PMTU payload 分段、RQ/DMA 写入和 RC/UD 语义会在后续任务中继续接上。
+
 ## 当前 Stub / TODO
 
-- 多 beat payload 提取留给 8.3。
+- 当前 payload extractor 只支持首个 512-bit beat 内的 payload；完整多 beat payload reassembly 仍是 TODO。
 - VLAN 情况下 RETH length 可能落在下一 beat，当前只提取 remote VA 和 rkey。
 - checksum 当前通过 `checksum_valid/checksum_ok` stub 接口接入；真实 IPv4/UDP/ICRC 计算器后续独立实现。
 - ICRC 只作为原始字段输出，不计算；完整 ICRC 属于 8.5。
-- 不实例化真实 MAC，也不连接 transport RX；测试使用 Cocotb 直接驱动 frame 接口。
+- 不实例化真实 MAC，也不连接第 9 阶段 transport engine；测试使用 Cocotb 直接驱动 frame 和 metadata 接口。
