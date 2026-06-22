@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -110,6 +110,7 @@ packet-tests:
 		$(MAKE) test-roce-ingress-validator; \
 		$(MAKE) test-roce-payload-extractor; \
 		$(MAKE) test-roce-packet-builder; \
+		$(MAKE) test-roce-icrc-placeholder; \
 	fi
 
 test-pcie-cfg:
@@ -334,6 +335,11 @@ test-roce-payload-extractor:
 test-roce-packet-builder:
 	$(MAKE) TOPLEVEL=roce_packet_builder MODULE=test_roce_packet_builder \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/packet/roce_packet_builder.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-roce-icrc-placeholder:
+	$(MAKE) TOPLEVEL=roce_icrc_placeholder MODULE=test_roce_icrc_placeholder \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/packet/roce_icrc_placeholder.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

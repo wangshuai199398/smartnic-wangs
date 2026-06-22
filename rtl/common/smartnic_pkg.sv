@@ -1651,6 +1651,12 @@ package smartnic_pkg;
         PKT_BUILD_ERR_MULTI_BEAT_STUB   = 5'd3
     } packet_build_error_e;
 
+    typedef enum logic [3:0] {
+        PKT_ICRC_STATUS_PLACEHOLDER = 4'd0,
+        PKT_ICRC_STATUS_UNCHECKED   = 4'd1,
+        PKT_ICRC_STATUS_MISMATCH    = 4'd2
+    } packet_icrc_status_e;
+
     typedef struct packed {
         logic [15:0]            desc_id;        // 来源 descriptor ID，透传给后续 transport/completion/debug。
         logic [QP_ID_W-1:0]     qpn;            // 上游关联的本地 QPN，入站场景可由后续 QP lookup 覆盖。
@@ -1750,6 +1756,19 @@ package smartnic_pkg;
         logic [15:0]            payload_len;    // payload 长度。
         logic [31:0]            icrc_placeholder; // 8.4 占位 ICRC，8.5 替换为真实计算。
     } packet_build_req_t;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // 关联 QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // 关联 CQN。
+        logic [VF_ID_W-1:0]     owner_function; // 所属 function。
+        logic [PD_ID_W-1:0]     pd_id;          // Protection Domain。
+        roce_opcode_e           opcode;         // RoCEv2 opcode。
+        packet_icrc_status_e    status;         // ICRC placeholder 状态。
+        logic [15:0]            error_code;     // ICRC 错误/限制码。
+        logic [31:0]            icrc_value;     // 输出给 builder 或 validator 的 ICRC 字段。
+        logic                   compatibility_limited; // 1 表示当前不是真实 ICRC，不能用于互操作。
+    } packet_icrc_result_t;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。

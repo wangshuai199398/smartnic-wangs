@@ -168,15 +168,45 @@ build_req_valid / build_req_ready / packet_build_req_t
 
 如果请求无法在单 beat 内输出，会返回 `PKT_BUILD_ERR_MULTI_BEAT_STUB`。不支持 opcode 返回 `PKT_BUILD_ERR_UNSUPPORTED`。
 
-### ICRC 边界
+## 8.5 ICRC Placeholder
 
-8.4 不实现真实 invariant CRC。`packet_build_req_t.icrc_placeholder` 会透传到 frame 尾部，作为后续 8.5 的占位接口。这样 packet builder 的 header layout 和 ready/valid 行为可以先被验证，而不会把 CRC 计算混进本阶段。
+`rtl/packet/roce_icrc_placeholder.sv` 是一个刻意隔离的 ICRC placeholder。它不计算真实 RoCEv2 invariant CRC，只透传已有 ICRC 字段，并输出 `compatibility_limited=1`。
+
+接口：
+
+```text
+req_valid / req_ready
+  -> req_desc_id / qpn / cqn / owner_function / pd_id / opcode
+  -> req_frame_data / req_frame_len / req_existing_icrc / req_is_tx
+
+result_valid / result_ready
+  -> packet_icrc_result_t
+```
+
+当前状态语义：
+
+| 状态 | 含义 |
+| --- | --- |
+| `PKT_ICRC_STATUS_PLACEHOLDER` | TX 方向透传 placeholder ICRC，未做真实 CRC。 |
+| `PKT_ICRC_STATUS_UNCHECKED` | RX 方向只提取 ICRC 字段，未做真实校验。 |
+| `PKT_ICRC_STATUS_MISMATCH` | 为后续真实 checker 预留，当前不会由 placeholder 产生。 |
+
+`roce_packet_builder.sv` 可以接收 `packet_icrc_result_t`。若未接入外部 ICRC result，则仍回退使用 `packet_build_req_t.icrc_placeholder`。这样后续把 placeholder 替换成真实 ICRC 计算器时，不需要重写 packet builder 的 header 生成接口。
+
+### 兼容性限制
+
+当前 8.5 满足任务中“clearly isolated placeholder with tests marking compatibility limitations”的路径，而不是完整 ICRC calculation。限制如下：
+
+- 不能用于真实 RoCEv2 网络互操作验证。
+- 不能检测入站 ICRC mismatch。
+- 不能证明 packet builder 输出满足 IBTA/RoCEv2 ICRC 要求。
+- 8.6 之后的完整协议测试应把该限制标为 known limitation，直到真实 ICRC 计算器替换 placeholder。
 
 ## 当前 Stub / TODO
 
 - 当前 payload extractor 只支持首个 512-bit beat 内的 payload；完整多 beat payload reassembly 仍是 TODO。
 - 当前 packet builder 只支持单个 512-bit beat 输出；多 beat packet segmentation 仍是 TODO。
 - VLAN 情况下 RETH length 可能落在下一 beat，当前只提取 remote VA 和 rkey。
-- checksum 当前通过 `checksum_valid/checksum_ok` stub 接口接入；真实 IPv4/UDP/ICRC 计算器后续独立实现。
-- ICRC RX 侧只作为原始字段输出，TX 侧只透传 placeholder；完整 ICRC 属于 8.5。
+- checksum 当前通过 `checksum_valid/checksum_ok` stub 接口接入；真实 IPv4/UDP checksum 计算器后续独立实现。
+- ICRC 当前使用隔离 placeholder，不计算真实 invariant CRC。
 - 不实例化真实 MAC，也不连接第 9 阶段 transport engine；测试使用 Cocotb 直接驱动 frame 和 metadata 接口。

@@ -75,7 +75,7 @@
 - [x] 8.2 Implement ingress validation for EtherType, IP version, IHL, protocol, UDP port, BTH transport version, opcode, checksum, and packet length.
 - [x] 8.3 Implement payload extraction interface from parser to receive DMA and transport logic.
 - [x] 8.4 Implement packet builder for Ethernet, IPv4, UDP, BTH, RETH, AETH, DETH, ImmDt, ACK, NAK, CNP, and payload frames.
-- [ ] 8.5 Implement ICRC calculation or a clearly isolated placeholder with tests marking compatibility limitations.
+- [x] 8.5 Implement ICRC calculation or a clearly isolated placeholder with tests marking compatibility limitations.
 - [ ] 8.6 Add packet tests for every supported opcode, invalid packet drop, header field extraction, header generation, payload alignment, and ICRC behavior.
 
 ## 9. RoCEv2 Transport Engine

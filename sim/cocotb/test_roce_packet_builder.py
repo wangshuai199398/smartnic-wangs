@@ -106,6 +106,8 @@ async def reset_dut(dut):
     dut.rst_n.value = 0
     dut.build_req_valid.value = 0
     dut.build_req.value = 0
+    dut.icrc_result_valid.value = 0
+    dut.icrc_result.value = 0
     dut.frame_ready.value = 1
     dut.build_error_ready.value = 1
     for _ in range(3):

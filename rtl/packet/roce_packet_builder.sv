@@ -10,6 +10,11 @@ module roce_packet_builder
     output logic                  build_req_ready,
     input  packet_build_req_t     build_req,
 
+    // 8.5 ICRC placeholder 结果。未接入时 builder 仍回退到 build_req.icrc_placeholder。
+    input  logic                  icrc_result_valid,
+    output logic                  icrc_result_ready,
+    input  packet_icrc_result_t   icrc_result,
+
     output logic                  frame_valid,
     input  logic                  frame_ready,
     output logic [511:0]          frame_data,
@@ -61,9 +66,11 @@ module roce_packet_builder
     logic                needs_imm;
     packet_build_error_e error_next;
     logic                out_ready;
+    logic [31:0]         selected_icrc;
 
     assign out_ready = error_path_q ? build_error_ready : frame_ready;
     assign build_req_ready = !holding_q || out_ready;
+    assign icrc_result_ready = build_req_valid && build_req_ready;
 
     assign frame_valid = holding_q && !error_path_q;
     assign frame_data  = frame_q;
@@ -126,6 +133,7 @@ module roce_packet_builder
                      + build_req.payload_len + ICRC_BYTES;
         udp_len = UDP_HDR_BYTES + BTH_HDR_BYTES + ext_len + build_req.payload_len + ICRC_BYTES;
         total_len = l2_len + ip_total_len;
+        selected_icrc = icrc_result_valid ? icrc_result.icrc_value : build_req.icrc_placeholder;
 
         frame_next = '0;
         frame_next[47:0]   = build_req.dst_mac;
@@ -179,11 +187,11 @@ module roce_packet_builder
             end
         end
 
-        // TODO 8.5: ICRC 当前使用请求中的 placeholder，不做真实 invariant CRC 计算。
+        // TODO: 当前使用 8.5 placeholder result，不做真实 invariant CRC 计算。
         if (!build_req.has_vlan && (payload_offset + ICRC_BYTES <= 16'd64)) begin
             payload_shift = {4'd0, payload_offset[5:0]} << 3;
             frame_next = frame_next | (build_req.payload_data << payload_shift);
-            frame_next[511:480] = build_req.icrc_placeholder;
+            frame_next[511:480] = selected_icrc;
         end
 
         error_next = PKT_BUILD_OK;
