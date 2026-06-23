@@ -326,3 +326,69 @@ imm_data[31:24], imm_data[23:16], imm_data[15:8], imm_data[7:0]
 - TODO：`RDMA_WRITE_WITH_IMM` 的 RETH+ImmDt 在当前单 beat packet builder 下可能触发 multi-beat stub，完整 wire segmentation 留给 packet builder 后续增强。
 - TODO：failure counters 目前只通过 `debug_status` 暴露，尚未接 CSR counter block。
 - TODO：UD immediate 行为不在 9.4 范围内，留给 9.5/9.6。
+
+## 9.5 UD Transmit Path
+
+`rtl/transport/ud_tx_engine.sv` 实现 UD 发送侧最小路径：
+
+```text
+decoded UD SEND WQE / ud_tx_req_t
+  -> AH lookup by ah_id
+  -> packet_build_req_t(opcode=ROCE_OPCODE_UD_SEND_ONLY)
+  -> DETH(qkey, source_qpn)
+  -> local SQ completion
+```
+
+UD 是无连接传输。9.5 不读取 RC remote QPN state，不维护 ACK、retry、RNR retry 或 outstanding window；只要求 WQE 解码后提供目标 `dest_qpn`、`ah_id`、payload 元数据以及本地 completion 信息。
+
+### AH Lookup
+
+`ud_tx_engine` 通过 ready/valid 接口请求 AH：
+
+| 字段 | 作用 |
+| --- | --- |
+| `ah_lookup_id` | 来自 UD WQE/WR 的 AH ID。 |
+| `ah_lookup_owner_function` | 用于 PF/VF 所有权检查。 |
+| `ah_lookup_pd_id` | 用于 AH 与 QP 的 PD 匹配。 |
+
+本阶段 AH table 本体留给 9.7；测试中使用 stub response。AH 命中后，目的 MAC、目的 IPv4、UDP 端口、P_Key 和默认 Q_Key 都来自 `ah_entry_t`。
+
+### DETH Generation
+
+UD SEND 输出 `packet_build_req_t`，并设置：
+
+| packet field | 来源 |
+| --- | --- |
+| `opcode` | `ROCE_OPCODE_UD_SEND_ONLY` |
+| `dest_qpn` | WQE/WR 中的 UD destination QPN |
+| `src_qpn` | 本地 UD QPN |
+| `qkey` | WQE qkey 非 0 时优先，否则使用 AH qkey |
+| `dst_mac` / `dst_ipv4` / UDP ports | AH entry |
+
+真正的 wire 编码由 `roce_packet_builder.sv` 完成。builder 已在 DETH 位置写入 `qkey` 和 `src_qpn`。
+
+### Completion And Errors
+
+UD 发送成功时不等待远端确认，直接生成本地 SQ completion：
+
+- `event_type = CMPL_EVENT_SQ`
+- `opcode = RDMA_OP_SEND`
+- `status = CMPL_SUCCESS`
+- `has_imm = 0`
+
+错误通过本地 WQE error 接口输出，不生成 UD receive 行为：
+
+| 错误 | 状态 |
+| --- | --- |
+| QP type 不是 UD | `UD_TX_STATUS_BAD_QP_TYPE` |
+| opcode 不是 `RDMA_OP_SEND` | `UD_TX_STATUS_UNSUPPORTED_OP` |
+| AH lookup miss 或 AH invalid | `UD_TX_STATUS_AH_MISS` |
+| AH owner/PD 不匹配 | `UD_TX_STATUS_AH_PERMISSION` |
+| WQE/AH 都没有 Q_Key | `UD_TX_STATUS_MISSING_QKEY` |
+
+### 当前 Stub/TODO
+
+- TODO：`ud_tx_req_t` 表示已经从 UD WQE 解码出的请求；完整 Verbs UD WQE 格式和 AH ID 放置方式留给用户态 WQE builder 和 SQ decode 后续细化。
+- TODO：AH table 存储、创建/销毁和 GID/GRH 相关字段留给 9.7、12.8、13.7。
+- TODO：UD receive、Q_Key 入站校验、source QPN receive CQE 上报和失败计数留给 9.6。
+- TODO：当前 payload 使用单 beat `packet_build_req_t.payload_data`，大 payload 分段继续由 DMA/packet 后续集成完成。

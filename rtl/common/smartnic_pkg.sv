@@ -1938,6 +1938,34 @@ package smartnic_pkg;
         RC_IMM_STATUS_MALFORMED   = 5'd4
     } rc_imm_status_e;
 
+    typedef enum logic [4:0] {
+        UD_TX_STATUS_OK             = 5'd0, // UD SEND 已接受并生成 packet/completion。
+        UD_TX_STATUS_BAD_QP_TYPE    = 5'd1, // 请求不是 UD QP，避免误走 RC connection 语义。
+        UD_TX_STATUS_UNSUPPORTED_OP = 5'd2, // UD transmit 当前只支持 SEND。
+        UD_TX_STATUS_AH_MISS        = 5'd3, // WQE 指向的 AH 不存在或无效。
+        UD_TX_STATUS_AH_PERMISSION  = 5'd4, // AH owner/PD 与请求不匹配。
+        UD_TX_STATUS_MISSING_QKEY   = 5'd5  // AH/WQE 未提供可放入 DETH 的 Q_Key。
+    } ud_tx_status_e;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // 来源 descriptor / SQ slot ID。
+        logic [QP_ID_W-1:0]     qpn;            // 本地 UD QPN，也是 DETH source QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // 本地 send completion 写入的 CQ。
+        logic [VF_ID_W-1:0]     owner_function; // 发起 UD SEND 的 PF/VF function。
+        logic [PD_ID_W-1:0]     pd_id;          // QP 所属 Protection Domain，用于 AH 权限检查。
+        logic [WR_ID_W-1:0]     wr_id;          // 原始 WR ID，回填到本地 send completion。
+        qp_type_e               qp_type;        // 必须为 QP_TYPE_UD。
+        rdma_opcode_e           opcode;         // 当前仅支持 RDMA_OP_SEND。
+        logic [AH_ID_W-1:0]     ah_id;          // WQE/WR 中携带的 Address Handle ID。
+        logic [QP_ID_W-1:0]     dest_qpn;       // UD BTH destination QPN。
+        logic [QKEY_W-1:0]      qkey;           // 可选 WQE Q_Key；为 0 时使用 AH qkey。
+        logic [PSN_W-1:0]       psn;            // UD packet PSN，通常来自 QP/SQ 侧分配。
+        logic [511:0]           payload_data;   // 单 beat UD payload，占位给后续 DMA payload stream。
+        logic [15:0]            payload_len;    // UD SEND payload 字节数。
+        logic                   solicited;      // 是否请求 solicited completion/packet hint。
+        logic                   completion_required; // 是否生成本地 send completion。
+    } ud_tx_req_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。
