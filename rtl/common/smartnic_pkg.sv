@@ -1861,6 +1861,74 @@ package smartnic_pkg;
         logic [31:0]            aeth;           // 供 packet builder 使用的最小 AETH placeholder。
     } transport_rx_ack_event_t;
 
+    typedef enum logic [4:0] {
+        RC_READ_STATUS_OK              = 5'd0,
+        RC_READ_STATUS_QP_LOOKUP_MISS  = 5'd1,
+        RC_READ_STATUS_QP_TYPE_ERR     = 5'd2,
+        RC_READ_STATUS_QP_STATE_ERR    = 5'd3,
+        RC_READ_STATUS_MR_DENIED       = 5'd4,
+        RC_READ_STATUS_PD_MISMATCH     = 5'd5,
+        RC_READ_STATUS_PSN_MISMATCH    = 5'd6,
+        RC_READ_STATUS_LENGTH_MISMATCH = 5'd7,
+        RC_READ_STATUS_DMA_READ_ERR    = 5'd8,
+        RC_READ_STATUS_DMA_WRITE_ERR   = 5'd9,
+        RC_READ_STATUS_OUTSTANDING_FULL = 5'd10,
+        RC_READ_STATUS_RETRY_TODO      = 5'd11
+    } rc_rdma_read_status_e;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // SQ/DMA descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // requester 本地 QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // requester completion CQN。
+        logic [VF_ID_W-1:0]     owner_function; // requester 所属 function。
+        logic [PD_ID_W-1:0]     pd_id;          // requester PD。
+        logic [WR_ID_W-1:0]     wr_id;          // 原始 RDMA Read WR ID。
+        qp_type_e               qp_type;        // 必须为 RC。
+        qp_state_e              qp_state;       // 必须允许发送，最小实现要求 RTS。
+        logic [QP_ID_W-1:0]     remote_qpn;     // responder QPN。
+        logic [PSN_W-1:0]       request_psn;    // Read Request 消耗的 PSN。
+        logic [PSN_W-1:0]       expected_resp_psn; // 期望首个 Read Response PSN。
+        logic [ADDR_W-1:0]      local_va;       // 本地接收 buffer VA。
+        logic [KEY_W-1:0]       local_lkey;     // 本地接收 buffer lkey。
+        logic [ADDR_W-1:0]      remote_va;      // 远端读取 VA。
+        logic [KEY_W-1:0]       remote_rkey;    // 远端 rkey。
+        logic [DMA_LEN_W-1:0]   length;         // 读取总长度。
+        logic [7:0]             retry_count;    // retry 参数预留。
+        logic [7:0]             rnr_retry_count;// RNR retry 参数预留。
+    } rc_rdma_read_req_t;
+
+    typedef struct packed {
+        logic                   valid;          // outstanding context 有效。
+        logic [15:0]            desc_id;        // descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // requester QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // completion CQN。
+        logic [VF_ID_W-1:0]     owner_function; // requester function。
+        logic [PD_ID_W-1:0]     pd_id;          // requester PD。
+        logic [WR_ID_W-1:0]     wr_id;          // WR ID。
+        logic [ADDR_W-1:0]      local_va;       // 本地写入 VA。
+        logic [KEY_W-1:0]       local_lkey;     // 本地 lkey。
+        logic [DMA_LEN_W-1:0]   total_len;      // 请求总长度。
+        logic [DMA_LEN_W-1:0]   received_len;   // 已接收响应字节数。
+        logic [PSN_W-1:0]       next_resp_psn;  // 期望的下一个 response PSN。
+    } rc_rdma_read_outstanding_t;
+
+    typedef struct packed {
+        logic [15:0]            desc_id;        // descriptor ID。
+        logic [QP_ID_W-1:0]     qpn;            // requester QPN。
+        logic [CQ_ID_W-1:0]     cqn;            // completion CQN。
+        logic [VF_ID_W-1:0]     owner_function; // requester function。
+        logic [PD_ID_W-1:0]     pd_id;          // requester PD。
+        logic [WR_ID_W-1:0]     wr_id;          // WR ID。
+        logic [ADDR_W-1:0]      local_va;       // 写入目标 VA。
+        logic [KEY_W-1:0]       local_lkey;     // 本地 lkey。
+        logic [511:0]           data;           // response payload 数据。
+        logic [15:0]            byte_len;       // 本 beat 有效字节数。
+        logic [DMA_LEN_W-1:0]   byte_offset;    // RDMA Read WR 内偏移。
+        logic                   last;           // 当前 beat 是否完成整个 RDMA Read。
+        rc_rdma_read_status_e   status;         // 写入请求状态。
+        logic [15:0]            error_code;     // 错误码。
+    } rc_rdma_read_local_write_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。

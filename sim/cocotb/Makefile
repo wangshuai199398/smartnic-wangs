@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-rc-send-engine test-rc-recv-engine clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -122,6 +122,7 @@ transport-tests:
 	else \
 		$(MAKE) test-rc-send-engine; \
 		$(MAKE) test-rc-recv-engine; \
+		$(MAKE) test-rc-rdma-read-engine; \
 	fi
 
 test-pcie-cfg:
@@ -365,6 +366,11 @@ test-rc-send-engine:
 test-rc-recv-engine:
 	$(MAKE) TOPLEVEL=rc_recv_engine MODULE=test_rc_recv_engine \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/transport/rc_recv_engine.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-rc-rdma-read-engine:
+	$(MAKE) TOPLEVEL=rc_rdma_read_engine MODULE=test_rc_rdma_read_engine \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/transport/rc_rdma_read_engine.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:

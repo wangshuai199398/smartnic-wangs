@@ -54,6 +54,7 @@
 | `test_roce_packet_stage8.py` | 第 8 阶段 packet mock integration | 全部支持 opcode、invalid packet drop、header extraction/generation、payload alignment、ICRC placeholder known limitation |
 | `test_rc_send_engine.py` | `rtl/transport/rc_send_engine.sv` | RC send-side PSN allocation、outstanding tracking、ACK clear、retry timer、retry exhausted QP error request |
 | `test_rc_recv_engine.py` | `rtl/transport/rc_recv_engine.sv` | RC receive-side PSN validation、duplicate/replay drop、gap NAK、ACK coalescing、RNR NAK |
+| `test_rc_rdma_read_engine.py` | `rtl/transport/rc_rdma_read_engine.sv` | RC RDMA Read request generation、responder MR/DMA read path、Read Response sequencing、local write、completion/error mapping |
 
 ## 运行方式
 
@@ -131,6 +132,7 @@ make -C sim/cocotb test-roce-icrc-placeholder
 make -C sim/cocotb test-roce-packet-stage8
 make -C sim/cocotb test-rc-send-engine
 make -C sim/cocotb test-rc-recv-engine
+make -C sim/cocotb test-rc-rdma-read-engine
 ```
 
 ## 当前限制
@@ -169,3 +171,4 @@ make -C sim/cocotb test-rc-recv-engine
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
+- RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。

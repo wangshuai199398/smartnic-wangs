@@ -155,3 +155,103 @@ Send 和 Send with Immediate 需要远端 RQ buffer。如果 `rq_buffer_availabl
 - TODO：ACK coalescing 是基础 count/timer 模型，未实现真实 ACK scheduler 或 multi-QP arbitration。
 - TODO：RNR retry 计数、RNR timer、receiver not ready 状态机留给后续 transport/QP 集成。
 - TODO：RDMA Read request/response sequencing 和 remote memory access side effect 留给 9.3。
+
+## 9.3 RDMA Read Request / Response Sequencing
+
+`rtl/transport/rc_rdma_read_engine.sv` 实现 RDMA Read 的三个最小半边：
+
+```text
+Requester SQ RDMA_READ descriptor
+  -> rc_rdma_read_engine
+  -> RDMA Read Request packet_build_req_t
+  -> packet builder / MAC TX
+
+Responder inbound Read Request
+  -> MR remote read check
+  -> DMA host read
+  -> RDMA Read Response packet_build_req_t
+  -> packet builder / MAC TX
+
+Requester inbound Read Response
+  -> outstanding read context match
+  -> response PSN / length check
+  -> local buffer write request
+  -> completion_event_t
+```
+
+### Requester Side
+
+Requester 输入使用 `rc_rdma_read_req_t`，保留：
+
+- `desc_id`
+- `qpn`
+- `cqn`
+- `owner_function`
+- `pd_id`
+- `wr_id`
+- `remote_qpn`
+- `request_psn`
+- `expected_resp_psn`
+- `local_va/local_lkey`
+- `remote_va/remote_rkey`
+- `length`
+- `retry/rnr_retry` 预留字段
+
+当前最小实现只支持一个 outstanding Read context。接收合法请求后会：
+
+1. 检查 `qp_type == QP_TYPE_RC`。
+2. 检查 requester QP state 为 `RTS`。
+3. 构造 `ROCE_OPCODE_RDMA_READ_REQ` 的 `packet_build_req_t`。
+4. 保存 outstanding context，用于后续 response 匹配、local write 和 completion。
+
+### Responder Side
+
+Responder 侧接收入站 `ROCE_OPCODE_RDMA_READ_REQ` metadata，使用外部 QP context snapshot 检查：
+
+- responder context valid；
+- QP type 为 RC；
+- QP state 为 RTR 或 RTS。
+
+通过后，模块发起 MR check：
+
+```text
+rkey + remote_va + length + owner_function + pd_id
+```
+
+MR check 通过后发起 DMA host read；DMA 返回 payload 后构造 `ROCE_OPCODE_RDMA_READ_RESP`。当前只输出单个 response packet，并保留 `read_response_first/middle/last/only` 标志，后续可扩展成 PMTU 分段 response。
+
+### Response Receive Side
+
+Requester 收到 Read Response 后，使用 outstanding context 检查：
+
+| 检查项 | 当前行为 |
+| --- | --- |
+| outstanding valid | 不存在则生成 `CMPL_BAD_RESP_ERR`。 |
+| response PSN | 必须等于 `next_resp_psn`。 |
+| response length | 不能为 0，不能超过剩余请求长度。 |
+| local write | 输出 `rc_rdma_read_local_write_t`，由后续 DMA host write path 消费。 |
+| completion | 所有 response 字节到达后输出 `completion_event_t`。 |
+
+多 response packet 通过 `next_resp_psn += 1` 和 `received_len += valid_bytes` 追踪。当前还没有完整 retry/NAK 重传，PSN mismatch 会直接生成 completion error。
+
+### 错误映射
+
+| 错误 | 当前输出 |
+| --- | --- |
+| QP type/state invalid | `CMPL_LOC_QP_OP_ERR` |
+| MR permission denied | `CMPL_REM_ACCESS_ERR` |
+| PD mismatch | `CMPL_LOC_PROT_ERR` |
+| response PSN mismatch | `CMPL_BAD_RESP_ERR` |
+| response length mismatch | `CMPL_LOC_LEN_ERR` |
+| DMA read error | `CMPL_DMA_ERR` |
+| local write/DMA write error | 预留 `RC_READ_STATUS_DMA_WRITE_ERR`，后续接 host write completion。 |
+| outstanding full | `CMPL_LOC_QP_OP_ERR` |
+
+### 当前 Stub/TODO
+
+- TODO：当前只支持一个 outstanding Read context；后续需要 per-QP outstanding table。
+- TODO：response first/middle/last/only 标志目前固定为 single response，占位给 PMTU 分段 response。
+- TODO：responder read response PSN 只是 `request.psn + 1` 的占位策略，后续应来自 QP send PSN allocator。
+- TODO：local write 只输出请求结构，不等待真实 host write completion。
+- TODO：MR check/DMA read 通过外部 ready/valid stub 接口接入，未实例化完整 MR/DMA pipeline。
+- TODO：retry exhausted、NAK replay、RNR retry 和 remote error packet 留给后续 transport 任务。
