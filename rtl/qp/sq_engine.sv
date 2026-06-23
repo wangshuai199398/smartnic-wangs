@@ -151,6 +151,7 @@ module sq_engine (
     assign wqe_fetch_rsp_fire = wqe_fetch_rsp_valid && wqe_fetch_rsp_ready;
 
     assign dispatch_needs_dma = (wqe_reg.opcode == RDMA_OP_RDMA_WRITE) ||
+                                (wqe_reg.opcode == RDMA_OP_RDMA_WRITE_WITH_IMM) ||
                                 (wqe_reg.opcode == RDMA_OP_RDMA_READ);
     assign dispatch_needs_transport = (wqe_reg.opcode == RDMA_OP_SEND) ||
                                       (wqe_reg.opcode == RDMA_OP_SEND_WITH_IMM);

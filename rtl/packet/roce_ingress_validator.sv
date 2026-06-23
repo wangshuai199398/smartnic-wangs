@@ -64,6 +64,7 @@ module roce_ingress_validator
             ROCE_OPCODE_SEND_ONLY,
             ROCE_OPCODE_SEND_ONLY_IMM,
             ROCE_OPCODE_RDMA_WRITE_ONLY,
+            ROCE_OPCODE_RDMA_WRITE_ONLY_IMM,
             ROCE_OPCODE_RDMA_READ_REQ,
             ROCE_OPCODE_RDMA_READ_RESP,
             ROCE_OPCODE_ACK,

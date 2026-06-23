@@ -206,7 +206,7 @@ module completion_engine (
                 end
                 CMPL_EVENT_RQ: begin
                     effective_flags |= CQE_FMT_FLAG_RECV;
-                    effective_opcode = event_reg.has_imm ? RDMA_OP_SEND_WITH_IMM : RDMA_OP_SEND;
+                    effective_opcode = event_reg.opcode;
                     effective_syndrome = (event_reg.status == CMPL_SUCCESS) ?
                                          CQE_SYNDROME_NONE : CQE_SYNDROME_SOURCE_ERR;
                 end

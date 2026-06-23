@@ -1608,6 +1608,7 @@ package smartnic_pkg;
         ROCE_OPCODE_SEND_ONLY       = 8'h04,
         ROCE_OPCODE_SEND_ONLY_IMM   = 8'h05,
         ROCE_OPCODE_RDMA_WRITE_ONLY = 8'h0a,
+        ROCE_OPCODE_RDMA_WRITE_ONLY_IMM = 8'h0b,
         ROCE_OPCODE_RDMA_READ_REQ   = 8'h0c,
         ROCE_OPCODE_RDMA_READ_RESP  = 8'h10,
         ROCE_OPCODE_ACK             = 8'h11,
@@ -1928,6 +1929,14 @@ package smartnic_pkg;
         rc_rdma_read_status_e   status;         // 写入请求状态。
         logic [15:0]            error_code;     // 错误码。
     } rc_rdma_read_local_write_t;
+
+    typedef enum logic [4:0] {
+        RC_IMM_STATUS_OK          = 5'd0,
+        RC_IMM_STATUS_RNR         = 5'd1,
+        RC_IMM_STATUS_REMOTE_DENY = 5'd2,
+        RC_IMM_STATUS_BAD_OPCODE  = 5'd3,
+        RC_IMM_STATUS_MALFORMED   = 5'd4
+    } rc_imm_status_e;
 
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。

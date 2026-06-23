@@ -255,3 +255,74 @@ Requester 收到 Read Response 后，使用 outstanding context 检查：
 - TODO：local write 只输出请求结构，不等待真实 host write completion。
 - TODO：MR check/DMA read 通过外部 ready/valid stub 接口接入，未实例化完整 MR/DMA pipeline。
 - TODO：retry exhausted、NAK replay、RNR retry 和 remote error packet 留给后续 transport 任务。
+
+## 9.4 SEND/RDMA_WRITE With Immediate
+
+`rtl/transport/rc_immediate_engine.sv` 处理 RC immediate-data 语义：
+
+```text
+SQ dispatch SEND_WITH_IMM / RDMA_WRITE_WITH_IMM
+  -> rc_immediate_engine
+  -> packet_build_req_t(has_imm=1, imm_data)
+  -> packet builder
+
+RX SEND_WITH_IMM
+  -> RQ availability check
+  -> receive completion_event_t(has_imm=1)
+
+RX RDMA_WRITE_WITH_IMM
+  -> remote memory write validation/write
+  -> RQ availability check
+  -> receive completion_event_t(has_imm=1)
+```
+
+### Opcode Handling
+
+已有 `wqe_t.imm_data` 是 32 bit。9.4 后：
+
+| WQE opcode | Transport behavior |
+| --- | --- |
+| `RDMA_OP_SEND_WITH_IMM` | 生成 `ROCE_OPCODE_SEND_ONLY_IMM`，设置 `has_imm=1`。 |
+| `RDMA_OP_RDMA_WRITE_WITH_IMM` | 生成 `ROCE_OPCODE_RDMA_WRITE_ONLY_IMM`，设置 `has_imm=1`。 |
+| `RDMA_OP_SEND` | 普通 Send，不设置 immediate flag。 |
+| `RDMA_OP_RDMA_WRITE` | 普通 RDMA Write，不生成 receive CQE。 |
+
+`sq_engine` 已把 `RDMA_OP_RDMA_WRITE_WITH_IMM` 归入 DMA/write 类路径，普通 `RDMA_WRITE` 语义不变。
+
+### Immediate Data Byte Order
+
+Immediate data 固定 32 bit。packet builder 对 ImmDt 按 network byte order 拼接：
+
+```text
+imm_data[31:24], imm_data[23:16], imm_data[15:8], imm_data[7:0]
+```
+
+因此测试值 `0x11223344` 在 packet representation 和 receive CQE 中保持同一个语义值。
+
+### Receive Completion
+
+`completion_event_t` 和 64-byte CQE 已有：
+
+- `has_imm`
+- `imm_data`
+- `CQE_FMT_FLAG_HAS_IMM`
+
+9.4 只在 `SEND_WITH_IMM` 和 `RDMA_WRITE_WITH_IMM` receive completion 中置位 `has_imm`。普通 SEND 和普通 RDMA_WRITE 不置位。
+
+`RDMA_WRITE_WITH_IMM` 的 receive completion 使用 `RDMA_OP_RDMA_WRITE_WITH_IMM` opcode；如果后续 Verbs provider 希望映射成普通 receive opcode + immediate flag，可以在用户态 CQE parser 层做兼容转换。
+
+### Error Behavior
+
+| 场景 | 行为 |
+| --- | --- |
+| `SEND_WITH_IMM` 无 RQ WQE | 走现有 RNR/error 路径，不生成 receive CQE。 |
+| `RDMA_WRITE_WITH_IMM` 无 RQ WQE | 走 RNR/error 路径，不生成 receive CQE。 |
+| `RDMA_WRITE_WITH_IMM` remote memory validation/write 失败 | 不生成 receive CQE。 |
+| malformed/non-immediate opcode | 输出 debug status，不进入 receive CQE path。 |
+
+### 当前 Stub/TODO
+
+- TODO：`rc_immediate_engine` 的 remote write validation/write 通过 ready/valid stub 接口接入，后续连接 MR/DMA pipeline。
+- TODO：`RDMA_WRITE_WITH_IMM` 的 RETH+ImmDt 在当前单 beat packet builder 下可能触发 multi-beat stub，完整 wire segmentation 留给 packet builder 后续增强。
+- TODO：failure counters 目前只通过 `debug_status` 暴露，尚未接 CSR counter block。
+- TODO：UD immediate 行为不在 9.4 范围内，留给 9.5/9.6。

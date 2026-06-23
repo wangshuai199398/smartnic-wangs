@@ -55,6 +55,7 @@
 | `test_rc_send_engine.py` | `rtl/transport/rc_send_engine.sv` | RC send-side PSN allocation、outstanding tracking、ACK clear、retry timer、retry exhausted QP error request |
 | `test_rc_recv_engine.py` | `rtl/transport/rc_recv_engine.sv` | RC receive-side PSN validation、duplicate/replay drop、gap NAK、ACK coalescing、RNR NAK |
 | `test_rc_rdma_read_engine.py` | `rtl/transport/rc_rdma_read_engine.sv` | RC RDMA Read request generation、responder MR/DMA read path、Read Response sequencing、local write、completion/error mapping |
+| `test_rc_immediate_engine.py` | `rtl/transport/rc_immediate_engine.sv` | SEND_WITH_IMM、RDMA_WRITE_WITH_IMM、0x11223344 byte order、RNR、remote write denial、normal SEND/WRITE no immediate CQE |
 
 ## 运行方式
 
@@ -133,6 +134,7 @@ make -C sim/cocotb test-roce-packet-stage8
 make -C sim/cocotb test-rc-send-engine
 make -C sim/cocotb test-rc-recv-engine
 make -C sim/cocotb test-rc-rdma-read-engine
+make -C sim/cocotb test-rc-immediate-engine
 ```
 
 ## 当前限制
@@ -172,3 +174,4 @@ make -C sim/cocotb test-rc-rdma-read-engine
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
 - RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。
+- RC immediate engine 测试只验证 9.4 的 RC SEND_WITH_IMM/RDMA_WRITE_WITH_IMM immediate-data receive completion 语义，不实现 UD immediate、完整 multi-beat packet builder 或 CSR failure counters。

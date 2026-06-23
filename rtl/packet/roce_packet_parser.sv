@@ -151,11 +151,13 @@ module roce_packet_parser
         end
 
         meta_next.has_reth = (opcode_raw == ROCE_OPCODE_RDMA_WRITE_ONLY) ||
+                             (opcode_raw == ROCE_OPCODE_RDMA_WRITE_ONLY_IMM) ||
                              (opcode_raw == ROCE_OPCODE_RDMA_READ_REQ);
         meta_next.has_aeth = (opcode_raw == ROCE_OPCODE_RDMA_READ_RESP) ||
                              (opcode_raw == ROCE_OPCODE_ACK);
         meta_next.has_deth = (opcode_raw == ROCE_OPCODE_UD_SEND_ONLY);
-        meta_next.has_imm  = (opcode_raw == ROCE_OPCODE_SEND_ONLY_IMM);
+        meta_next.has_imm  = (opcode_raw == ROCE_OPCODE_SEND_ONLY_IMM) ||
+                             (opcode_raw == ROCE_OPCODE_RDMA_WRITE_ONLY_IMM);
 
         if (frame_len > payload_offset_calc + ICRC_BYTES) begin
             meta_next.payload_len = frame_len - payload_offset_calc - ICRC_BYTES;

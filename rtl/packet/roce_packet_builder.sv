@@ -101,9 +101,12 @@ module roce_packet_builder
                 needs_imm = 1'b1;
             end
             ROCE_OPCODE_RDMA_WRITE_ONLY,
+            ROCE_OPCODE_RDMA_WRITE_ONLY_IMM,
             ROCE_OPCODE_RDMA_READ_REQ: begin
                 supported_opcode = 1'b1;
                 needs_reth = 1'b1;
+                needs_imm = (build_req.opcode == ROCE_OPCODE_RDMA_WRITE_ONLY_IMM) ||
+                            build_req.has_imm;
             end
             ROCE_OPCODE_RDMA_READ_RESP,
             ROCE_OPCODE_ACK: begin
@@ -183,7 +186,14 @@ module roce_packet_builder
                 frame_next[415:384] = build_req.qkey;
                 frame_next[447:424] = build_req.src_qpn;
             end else if (needs_imm) begin
-                frame_next[415:384] = build_req.imm_data;
+                // Immediate data 是 32-bit network byte order。packed bit 表示中显式按
+                // byte 顺序拼接，便于测试 0x11223344 这类非平凡值。
+                frame_next[415:384] = {
+                    build_req.imm_data[31:24],
+                    build_req.imm_data[23:16],
+                    build_req.imm_data[15:8],
+                    build_req.imm_data[7:0]
+                };
             end
         end
 
