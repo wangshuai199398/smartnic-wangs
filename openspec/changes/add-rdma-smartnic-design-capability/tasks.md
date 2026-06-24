@@ -85,7 +85,7 @@
 - [x] 9.3 Implement RDMA Read request and response sequencing for RC QPs.
 - [x] 9.4 Implement RDMA Write and Send immediate-data handling.
 - [x] 9.5 Implement UD transmit path with AH lookup, DETH generation, Q_Key handling, and no connection state.
-- [ ] 9.6 Implement UD receive path with DETH parsing, Q_Key validation, source QPN reporting, and failure counters.
+- [x] 9.6 Implement UD receive path with DETH parsing, Q_Key validation, source QPN reporting, and failure counters.
 - [ ] 9.7 Implement address handle table for destination MAC, IP, UDP port, GID-derived fields, and service level metadata.
 - [ ] 9.8 Add transport tests for RC Send, RDMA Write, RDMA Read, UD Send, PSN errors, retries, RNR, immediate data, and Q_Key rejection.
 

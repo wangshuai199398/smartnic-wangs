@@ -1966,6 +1966,28 @@ package smartnic_pkg;
         logic                   completion_required; // 是否生成本地 send completion。
     } ud_tx_req_t;
 
+    typedef enum logic [4:0] {
+        UD_RX_STATUS_OK             = 5'd0, // UD packet 已通过检查并生成 receive completion seed。
+        UD_RX_STATUS_INVALID_DETH   = 5'd1, // packet 缺失 DETH 或 DETH 字段无效。
+        UD_RX_STATUS_QKEY_MISMATCH  = 5'd2, // DETH Q_Key 与目标 UD QP qkey 不匹配。
+        UD_RX_STATUS_MISSING_RQ_WQE = 5'd3, // 目标 QP 没有可消费的 Recv WQE。
+        UD_RX_STATUS_MALFORMED      = 5'd4, // opcode/status/payload 元数据不符合 UD receive 最小要求。
+        UD_RX_STATUS_QP_ERROR       = 5'd5, // QP lookup/type/state/permission 检查失败。
+        UD_RX_STATUS_DMA_ERROR      = 5'd6  // payload 写入 receive buffer 的 DMA stub 报错。
+    } ud_rx_status_e;
+
+    typedef struct packed {
+        logic [31:0] invalid_deth;   // 缺失或无效 DETH drop 计数。
+        logic [31:0] qkey_mismatch;  // Q_Key 不匹配 drop 计数。
+        logic [31:0] missing_rq_wqe; // 无 Recv WQE drop 计数。
+        logic [31:0] malformed;      // malformed/unsupported UD packet drop 计数。
+    } ud_rx_counters_t;
+
+    typedef struct packed {
+        completion_event_t       event;      // 送往 completion_engine 的基础 receive completion event。
+        logic [QP_ID_W-1:0]      source_qpn; // DETH source QPN，后续 CQE/parser 用于 Verbs wc.src_qp。
+    } ud_rx_completion_t;
+
     typedef struct packed {
         csr_cmd_e                   cmd_id;         // Mailbox 命令操作码。
         logic [VF_ID_W-1:0]         func_id;        // 拥有该命令的 PF/VF function。

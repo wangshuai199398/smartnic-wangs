@@ -57,6 +57,7 @@
 | `test_rc_rdma_read_engine.py` | `rtl/transport/rc_rdma_read_engine.sv` | RC RDMA Read request generation、responder MR/DMA read path、Read Response sequencing、local write、completion/error mapping |
 | `test_rc_immediate_engine.py` | `rtl/transport/rc_immediate_engine.sv` | SEND_WITH_IMM、RDMA_WRITE_WITH_IMM、0x11223344 byte order、RNR、remote write denial、normal SEND/WRITE no immediate CQE |
 | `test_ud_tx_engine.py` | `rtl/transport/ud_tx_engine.sv` | UD SEND、AH lookup、DETH Q_Key/source QPN、无 RC connection state、invalid AH、missing Q_Key、拒绝 UD RDMA ops |
+| `test_ud_rx_engine.py` | `rtl/transport/ud_rx_engine.sv` | UD receive DETH parsing、Q_Key validation、source QPN completion seed、missing RQ WQE、malformed/invalid DETH counters |
 
 ## 运行方式
 

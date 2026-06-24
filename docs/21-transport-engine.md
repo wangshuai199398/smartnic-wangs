@@ -392,3 +392,78 @@ UD 发送成功时不等待远端确认，直接生成本地 SQ completion：
 - TODO：AH table 存储、创建/销毁和 GID/GRH 相关字段留给 9.7、12.8、13.7。
 - TODO：UD receive、Q_Key 入站校验、source QPN receive CQE 上报和失败计数留给 9.6。
 - TODO：当前 payload 使用单 beat `packet_build_req_t.payload_data`，大 payload 分段继续由 DMA/packet 后续集成完成。
+
+## 9.6 UD Receive Path
+
+`rtl/transport/ud_rx_engine.sv` 实现 UD 接收侧最小路径：
+
+```text
+packet_meta_t(has_deth, qkey, src_qpn, dest_qpn)
+  + packet_payload_stream_t
+  -> target UD QP lookup
+  -> DETH / Q_Key validation
+  -> Recv WQE availability check
+  -> receive buffer DMA write stub
+  -> ud_rx_completion_t(source_qpn + completion_event_t)
+```
+
+UD receive 不使用 RC connection state。它不生成 ACK、NAK、retry 或 RNR retry；无效 packet 直接 drop 并更新 failure counter。
+
+### DETH And Q_Key Validation
+
+UD packet 必须满足：
+
+| 检查 | 失败行为 |
+| --- | --- |
+| opcode 为 `ROCE_OPCODE_UD_SEND_ONLY` | `UD_RX_STATUS_MALFORMED` |
+| `has_deth = 1` | `UD_RX_STATUS_INVALID_DETH` |
+| DETH `qkey != 0` | `UD_RX_STATUS_INVALID_DETH` |
+| DETH `src_qpn != 0` | `UD_RX_STATUS_INVALID_DETH` |
+| 目标 QP 是 `QP_TYPE_UD` 且处于 RTR/RTS/SQD | `UD_RX_STATUS_QP_ERROR` |
+| `qp_context_t.qkey == packet_meta_t.qkey` | `UD_RX_STATUS_QKEY_MISMATCH` |
+
+Q_Key 只与目标 UD QP context 比较。9.6 不修改 AH table，也不读取 AH。
+
+### RQ And Payload Delivery
+
+9.6 使用一个 Recv WQE stub 接口表示已经有可用 RQ WQE：
+
+- `rq_wqe_available`
+- `rq_wqe_wr_id`
+- `rq_wqe_cqn`
+- `rq_wqe_buffer_addr`
+- `rq_wqe_lkey`
+- `rq_wqe_buffer_len`
+
+如果没有可用 RQ WQE，模块输出 `UD_RX_STATUS_MISSING_RQ_WQE` 并递增 `missing_rq_wqe` counter。成功路径会发出 `rq_dma_write_req_t` 和 payload beat，等待 `dma_write_done_valid` 后消费 RQ WQE 并生成 completion seed。
+
+### Source QPN Reporting
+
+现有 `completion_event_t` 没有独立 `source_qpn` 字段。为了不扰动 5.x completion engine 和已有 packed tests，9.6 新增：
+
+```systemverilog
+typedef struct packed {
+    completion_event_t event;
+    logic [QP_ID_W-1:0] source_qpn;
+} ud_rx_completion_t;
+```
+
+`ud_rx_engine` 同时把 `source_qpn` 放入 `event.vendor_error[23:0]` 作为当前阶段的调试/测试透传。后续 9.8/13.10 可把它正式接入 CQE parser，使 Verbs `wc.src_qp` 从 `ud_rx_completion_t.source_qpn` 获取。
+
+### Failure Counters
+
+`ud_rx_counters_t` 保存 4 类 drop 计数：
+
+| Counter | 对应失败 |
+| --- | --- |
+| `invalid_deth` | 缺失 DETH、Q_Key 为 0 或 source QPN 为 0 |
+| `qkey_mismatch` | DETH Q_Key 与目标 QP Q_Key 不一致 |
+| `missing_rq_wqe` | 目标 RQ 没有 Recv WQE |
+| `malformed` | unsupported opcode、payload/status 异常、长度错误或未分类 drop |
+
+### 当前 Stub/TODO
+
+- TODO：RQ WQE fetch 和 RQ consumer index 更新目前由 stub 接口表示，后续 top 集成时接 4.5 RQ engine 或 QP/RQ manager。
+- TODO：payload 写入使用 DMA write stub，真实 MR/lkey 检查和 host write path 由 7.x DMA/MR 模块在 top 中连接。
+- TODO：`source_qpn` 尚未进入正式 64-byte CQE 字段，当前通过 `ud_rx_completion_t` 和 `vendor_error[23:0]` 可观测。
+- TODO：UD receive with immediate、GRH/GID、P_Key 细节和更完整的 malformed counter 分类留给后续 transport/driver/userspace 集成。
