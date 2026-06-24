@@ -467,3 +467,76 @@ typedef struct packed {
 - TODO：payload 写入使用 DMA write stub，真实 MR/lkey 检查和 host write path 由 7.x DMA/MR 模块在 top 中连接。
 - TODO：`source_qpn` 尚未进入正式 64-byte CQE 字段，当前通过 `ud_rx_completion_t` 和 `vendor_error[23:0]` 可观测。
 - TODO：UD receive with immediate、GRH/GID、P_Key 细节和更完整的 malformed counter 分类留给后续 transport/driver/userspace 集成。
+
+## 9.7 Address Handle Table
+
+`rtl/transport/ah_table.sv` 保存 UD 发送路径使用的 Address Handle。AH table 是 UD 的“目的地址账本”：UD QP 不像 RC QP 那样保存固定 peer connection，所以每个 UD SEND 都通过 `ah_id` 找到 packet 构造所需的目的地址元数据。
+
+### AH Entry
+
+`ah_entry_t` 现在包含：
+
+| 字段 | 作用 |
+| --- | --- |
+| `dst_mac` / `dst_ipv4` | packet builder 使用的目的以太网/IP 地址。 |
+| `udp_src_port` / `udp_dst_port` | RoCEv2 UDP 端口元数据。 |
+| `pkey` / `qkey` | BTH P_Key 和 DETH Q_Key。 |
+| `traffic_class` / `hop_limit` / `service_level` | QoS、TTL/HL 和服务等级元数据。 |
+| `dgid_hi` / `dgid_lo` | 目的 GID 派生字段，后续 GRH/IPv6/GID path 使用。 |
+| `sgid_index` | 本地 GID table 索引。 |
+| `flow_label` | GID/GRH 派生 flow label 元数据。 |
+
+9.7 仍以 IPv4 RoCEv2 packet builder 为主，GID 相关字段先随 AH 透传和保存，完整 GRH/IPv6 wire format 留给后续扩展。
+
+### Table Operations
+
+AH table 支持四类 ready/valid 操作：
+
+| 操作 | 行为 |
+| --- | --- |
+| create | 写入新的 valid AH entry；拒绝 duplicate `ah_id`、无效地址或缺失 Q_Key。 |
+| update | 按 `ah_id` 更新已有 entry；检查 owner function 和 PD。 |
+| lookup | 按 `ah_id` 查找并返回 `ah_entry_t`，输出直接兼容 `ud_tx_engine` 的 AH lookup response。 |
+| delete | 按 `ah_id` 清除 entry；检查 owner function 和 PD。 |
+
+`AH_TABLE_STATUS_PERMISSION` 用于防止 VF 或进程使用不属于自己的 AH。`AH_TABLE_STATUS_ALIAS` 表示同一个 `ah_id` 被多个 valid entry 占用，这会让 UD SEND 无法唯一确定目的地址，因此必须拒绝。
+
+### UD TX Integration
+
+9.5 的 `ud_tx_engine` 已经通过以下接口请求 AH：
+
+```text
+ah_lookup_valid / ready
+ah_lookup_id
+ah_lookup_owner_function
+ah_lookup_pd_id
+ah_lookup_resp_valid / ready
+ah_lookup_hit
+ah_lookup_entry
+ah_lookup_error_code
+```
+
+9.7 的 `ah_table.lookup_*` 可直接接到这些端口。查表命中后，UD TX 把 `ah_entry_t` 中的目的 MAC/IP/UDP/P_Key/Q_Key 填入 `packet_build_req_t`，packet builder 再生成带 DETH 的 UD packet。
+
+### 当前 Stub/TODO
+
+- TODO：AH create/update/delete 的驱动 ioctl 和 CSR mailbox 命令连接留给 12.8/13.7。
+- TODO：GID-derived metadata 当前只保存和测试透传，不生成 GRH/IPv6 wire header。
+- TODO：AH table 当前是寄存器数组模型，后续原型可替换为 SRAM/BRAM。
+
+## 9.8 Transport Tests
+
+9.8 新增 `sim/cocotb/test_transport_stage9.py` 作为纯 Python transport mock regression，并把它纳入 `make transport-test`。它覆盖：
+
+- RC Send ACK 清除 outstanding；
+- RDMA Write 成功和 permission error；
+- RDMA Read request/response、response sequencing error；
+- PSN gap 触发 sequence NAK；
+- retry 和 retry exhausted；
+- RNR / missing receive queue；
+- SEND_WITH_IMM 和 RDMA_WRITE_WITH_IMM immediate data；
+- UD SEND 通过 AH 获取 DETH/Q_Key/source QPN 和目的地址；
+- UD 上 RDMA opcode 被拒绝；
+- UD receive Q_Key mismatch 被拒绝。
+
+模块级 cocotb 测试继续覆盖各 RTL 模块：`rc_send_engine`、`rc_recv_engine`、`rc_rdma_read_engine`、`rc_immediate_engine`、`ud_tx_engine`、`ud_rx_engine` 和 `ah_table`。当本机没有 cocotb/verilator 时，`transport-stage9` 仍可运行，RTL cocotb 测试会按 Makefile 既有逻辑跳过。

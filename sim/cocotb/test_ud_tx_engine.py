@@ -34,6 +34,7 @@ AH_FIELDS = [
     ("dst_mac", 48), ("dst_ipv4", 32), ("udp_src_port", 16),
     ("udp_dst_port", 16), ("pkey", 16), ("qkey", 32),
     ("traffic_class", 8), ("hop_limit", 8), ("service_level", 3),
+    ("dgid_hi", 64), ("dgid_lo", 64), ("sgid_index", 8), ("flow_label", 20),
 ]
 
 BUILD_REQ_FIELDS = [
@@ -109,6 +110,10 @@ def pack_ah(**overrides):
         "traffic_class": 0,
         "hop_limit": 64,
         "service_level": 0,
+        "dgid_hi": 0xFE80000000000000,
+        "dgid_lo": 0x0000000000000002,
+        "sgid_index": 3,
+        "flow_label": 0x12345,
     }
     values.update(overrides)
     return pack_fields(AH_FIELDS, values)

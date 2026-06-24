@@ -282,6 +282,9 @@ AH 是 Address Handle，主要用于 UD。
 - traffic class
 - hop limit
 - service level
+- destination GID high/low
+- source GID index
+- flow label
 
 UD 没有 RC 那种连接状态，所以发送时需要 AH 提供目的地址信息。
 

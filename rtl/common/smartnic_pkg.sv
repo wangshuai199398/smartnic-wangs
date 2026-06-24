@@ -177,6 +177,8 @@ package smartnic_pkg;
     parameter int CQ_TABLE_INDEX_W = 10;          // CQ context 表 slot 索引位宽，覆盖 1024 项。
     parameter int MR_TABLE_DEPTH  = 1024;         // 原型阶段片上 MR 表项数量。
     parameter int MR_TABLE_INDEX_W = 10;          // MR 表 slot 索引位宽，覆盖 1024 项。
+    parameter int AH_TABLE_DEPTH  = 256;          // 原型阶段片上 AH 表项数量。
+    parameter int AH_TABLE_INDEX_W = 8;           // AH 表 slot 索引位宽，覆盖 256 项。
     parameter int MR_REFCOUNT_W   = 16;           // MR in-flight DMA 引用计数位宽。
     parameter int SG_ENTRY_BYTES  = 32;           // pinned SG entry 格式大小，单位为字节。
     parameter int SG_ENTRY_W      = SG_ENTRY_BYTES * 8; // pinned SG entry packed 宽度。
@@ -1564,6 +1566,10 @@ package smartnic_pkg;
         logic [7:0]                 traffic_class;  // IPv4 DSCP/ECN traffic class 元数据。
         logic [7:0]                 hop_limit;      // 类似 IPv4 TTL 的 hop limit。
         logic [2:0]                 service_level;  // 服务等级/优先级类别。
+        logic [63:0]                dgid_hi;        // 目的 GID 高 64 bit，用于后续 GRH/GID 派生。
+        logic [63:0]                dgid_lo;        // 目的 GID 低 64 bit，用于后续 IPv6/GRH 扩展。
+        logic [7:0]                 sgid_index;     // 本地 GID table 索引，驱动创建 AH 时填入。
+        logic [19:0]                flow_label;     // GID/GRH 派生 flow label 元数据。
     } ah_entry_t;
 
     typedef struct packed {
@@ -1937,6 +1943,15 @@ package smartnic_pkg;
         RC_IMM_STATUS_BAD_OPCODE  = 5'd3,
         RC_IMM_STATUS_MALFORMED   = 5'd4
     } rc_imm_status_e;
+
+    typedef enum logic [3:0] {
+        AH_TABLE_STATUS_OK         = 4'd0, // AH create/update/lookup/delete 成功。
+        AH_TABLE_STATUS_MISS       = 4'd1, // AH ID 未命中。
+        AH_TABLE_STATUS_ALIAS      = 4'd2, // 同一个 AH ID 出现多个 valid 表项。
+        AH_TABLE_STATUS_PERMISSION = 4'd3, // owner_function 或 PD 不匹配。
+        AH_TABLE_STATUS_FULL       = 4'd4, // 没有空闲 AH table slot。
+        AH_TABLE_STATUS_INVALID    = 4'd5  // AH entry 无效或字段不满足最小要求。
+    } ah_table_status_e;
 
     typedef enum logic [4:0] {
         UD_TX_STATUS_OK             = 5'd0, // UD SEND 已接受并生成 packet/completion。

@@ -52,6 +52,8 @@
 | `test_roce_packet_builder.py` | `rtl/packet/roce_packet_builder.sv` | Ethernet/IPv4/UDP/BTH frame 构造、RETH、AETH/ACK、DETH、ImmDt、CNP、payload、unsupported opcode、multi-beat stub、backpressure |
 | `test_roce_icrc_placeholder.py` | `rtl/packet/roce_icrc_placeholder.sv` | ICRC placeholder 透传、RX unchecked 标记、compatibility_limited 标志、backpressure |
 | `test_roce_packet_stage8.py` | 第 8 阶段 packet mock integration | 全部支持 opcode、invalid packet drop、header extraction/generation、payload alignment、ICRC placeholder known limitation |
+| `test_transport_stage9.py` | 第 9 阶段 transport mock regression | RC Send、RDMA Write、RDMA Read、PSN errors、retry exhaustion、RNR、immediate data、UD Send、Q_Key rejection |
+| `test_ah_table.py` | `rtl/transport/ah_table.sv` | AH create/update/lookup/delete、owner/PD permission、GID-derived metadata、service_level、alias/invalid entry |
 | `test_rc_send_engine.py` | `rtl/transport/rc_send_engine.sv` | RC send-side PSN allocation、outstanding tracking、ACK clear、retry timer、retry exhausted QP error request |
 | `test_rc_recv_engine.py` | `rtl/transport/rc_recv_engine.sv` | RC receive-side PSN validation、duplicate/replay drop、gap NAK、ACK coalescing、RNR NAK |
 | `test_rc_rdma_read_engine.py` | `rtl/transport/rc_rdma_read_engine.sv` | RC RDMA Read request generation、responder MR/DMA read path、Read Response sequencing、local write、completion/error mapping |
