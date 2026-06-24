@@ -1602,13 +1602,19 @@ package smartnic_pkg;
 
     // RoCEv2 packet parser 共享常量和元数据格式。
     localparam logic [15:0] ETH_TYPE_IPV4     = 16'h0800; // IPv4 EtherType。
+    localparam logic [15:0] ETH_TYPE_IPV6     = 16'h86dd; // IPv6 EtherType；10.1 阶段只解析 traffic class/ECN。
     localparam logic [15:0] ETH_TYPE_VLAN     = 16'h8100; // 802.1Q VLAN EtherType。
     localparam logic [15:0] ETH_TYPE_QINQ     = 16'h88a8; // 802.1ad QinQ EtherType，本阶段只识别一层 VLAN。
     localparam logic [7:0]  IP_PROTO_UDP      = 8'h11;   // IPv4 UDP protocol number。
     localparam logic [15:0] ROCEV2_UDP_PORT   = 16'd4791; // RoCEv2 UDP destination port。
     localparam logic [3:0]  BTH_TRANSPORT_VER = 4'h0;    // RoCEv2 BTH transport version。
     localparam logic [3:0]  IPV4_VERSION      = 4'h4;    // IPv4 version 字段。
+    localparam logic [3:0]  IPV6_VERSION      = 4'h6;    // IPv6 version 字段。
     localparam logic [3:0]  IPV4_MIN_IHL      = 4'h5;    // 当前最小实现只支持无 IPv4 option 的 20B header。
+    localparam logic [1:0]  ECN_NOT_ECT       = 2'b00;   // 非 ECN capable transport。
+    localparam logic [1:0]  ECN_ECT1          = 2'b01;   // ECN capable transport(1)。
+    localparam logic [1:0]  ECN_ECT0          = 2'b10;   // ECN capable transport(0)。
+    localparam logic [1:0]  ECN_CE            = 2'b11;   // Congestion Experienced 标记。
 
     typedef enum logic [7:0] {
         ROCE_OPCODE_SEND_ONLY       = 8'h04,
@@ -1678,6 +1684,11 @@ package smartnic_pkg;
         logic [15:0]            vlan_tci;       // VLAN TCI，未带 VLAN 时为 0。
         logic [3:0]             ip_version;     // IPv4 version 字段。
         logic [3:0]             ip_ihl;         // IPv4 IHL，当前 validator 只接受 5。
+        logic [7:0]             ip_dsfield;     // IPv4 DS field 或 IPv6 traffic class 原始值。
+        logic [7:0]             ipv6_traffic_class; // IPv6 traffic class；IPv4 包为 0。
+        logic [1:0]             ecn;            // DS/traffic class 低 2 bit 的 ECN 字段。
+        logic                   ecn_valid;      // 该包是否带有可解析 ECN 字段。
+        logic                   ecn_ce;         // ECN 字段是否为 CE(11)，供拥塞控制后续生成 CNP。
         logic [15:0]            ip_total_length;// IPv4 total length。
         logic [7:0]             ip_protocol;    // IPv4 protocol，应为 UDP。
         logic [15:0]            ip_checksum;    // IPv4 header checksum 原始字段；校验结果由外部 checksum checker 输入。
@@ -1716,6 +1727,9 @@ package smartnic_pkg;
         roce_opcode_e           opcode;         // RoCEv2 opcode。
         packet_payload_error_e  status;         // payload extraction 状态。
         logic [15:0]            error_code;     // payload extraction 错误码，成功为 0。
+        logic [1:0]             ecn;            // 从 ingress IP header 继承的 ECN 字段。
+        logic                   ecn_valid;      // ECN 字段是否有效。
+        logic                   ecn_ce;         // 是否检测到 CE 标记。
         logic [511:0]           data;           // 当前 beat 对齐后的 payload 数据。
         logic [15:0]            payload_len;    // 本次输出 payload 总长度。
         logic [15:0]            valid_bytes;    // 当前 data 中有效 payload 字节数。

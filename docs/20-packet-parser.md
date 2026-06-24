@@ -28,7 +28,8 @@ transport/DMA TX request
 | --- | --- |
 | Ethernet | EtherType |
 | VLAN | 单层 VLAN TCI 和内层 EtherType |
-| IPv4 | source IPv4、destination IPv4 |
+| IPv4 | DS field、ECN、source IPv4、destination IPv4 |
+| IPv6 | traffic class 中的 ECN 位；完整 IPv6 RoCEv2 header 解析后续实现 |
 | UDP | source port、destination port |
 | BTH | opcode、P_Key、destination QPN、PSN |
 | RETH | remote virtual address、rkey、DMA length |
@@ -38,6 +39,13 @@ transport/DMA TX request
 | ICRC | invariant CRC 原始字段 |
 
 解析结果通过 `packet_meta_t` 输出，并保留 `desc_id`、`qpn`、`cqn`、`owner_function`、`pd_id`、`opcode`、`status/error_code`，方便后续模块把包和 QP/CQ/MR/DMA/完成路径关联起来。
+
+10.1 在 ingress parser 中新增 ECN 提取：
+
+- IPv4：从 DS field 的低 2 bit 提取 `ecn`。
+- IPv6：从 traffic class 的低 2 bit 提取 `ecn`，但完整 IPv6 RoCEv2 packet layout 仍保持 `UNSUPPORTED_LAYOUT`，只保留 ECN metadata 给 drop/debug/congestion 逻辑。
+- `ecn_ce=1` 表示 ECN 字段为 CE(11)，后续拥塞控制模块可据此生成 CNP。
+- `roce_payload_extractor` 会把 `ecn/ecn_valid/ecn_ce` 继续传入 `packet_payload_stream_t`，保证 transport receive path 可以看到该标记。
 
 ## Ready/Valid 语义
 
@@ -85,6 +93,7 @@ parser 当前只设置结构性状态：
 - `PKT_PARSE_STATUS_OK`：首 beat 足够输出 metadata。
 - `PKT_PARSE_STATUS_NEED_MORE_DATA`：`frame_last=0`，表示后续 payload 或扩展字段还在下一 beat。
 - `PKT_PARSE_STATUS_SHORT_FRAME`：帧长度短于最小 RoCEv2 header 加 ICRC。
+- `PKT_PARSE_STATUS_UNSUPPORTED_LAYOUT`：例如当前只提取 ECN metadata、但不放行完整 RoCEv2 IPv6 layout 的包。
 
 validator 则把非 OK parser status 统一转换为 `PKT_VALIDATION_ERR_PARSE`。
 
@@ -113,6 +122,7 @@ frame beat:         frame_valid / frame_ready / frame_data / frame_len / frame_l
 - `pd_id`
 - `opcode`
 - `status/error_code`
+- `ecn/ecn_valid/ecn_ce`
 - `payload_len`
 - `valid_bytes`
 - `byte_offset`

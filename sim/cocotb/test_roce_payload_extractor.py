@@ -30,6 +30,11 @@ PACKET_META_FIELDS = [
     ("vlan_tci", 16),
     ("ip_version", 4),
     ("ip_ihl", 4),
+    ("ip_dsfield", 8),
+    ("ipv6_traffic_class", 8),
+    ("ecn", 2),
+    ("ecn_valid", 1),
+    ("ecn_ce", 1),
     ("ip_total_length", 16),
     ("ip_protocol", 8),
     ("ip_checksum", 16),
@@ -68,6 +73,9 @@ PACKET_PAYLOAD_FIELDS = [
     ("opcode", 8),
     ("status", 5),
     ("error_code", 16),
+    ("ecn", 2),
+    ("ecn_valid", 1),
+    ("ecn_ce", 1),
     ("data", 512),
     ("payload_len", 16),
     ("valid_bytes", 16),
@@ -188,6 +196,17 @@ async def emits_transport_metadata_and_payload_stream(dut):
     assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "valid_bytes") == 6
     assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "first") == 1
     assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "last") == 1
+
+
+@cocotb.test()
+async def propagates_ecn_ce_mark_to_payload_stream(dut):
+    await reset_dut(dut)
+    await send_pair(dut, pack_meta(ip_dsfield=0x03, ecn=0x03, ecn_valid=1, ecn_ce=1))
+    payload = await wait_payload(dut)
+
+    assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "ecn") == 0x03
+    assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "ecn_valid") == 1
+    assert extract_field(PACKET_PAYLOAD_FIELDS, payload, "ecn_ce") == 1
 
 
 @cocotb.test()

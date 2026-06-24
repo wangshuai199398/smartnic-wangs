@@ -56,6 +56,8 @@ module roce_packet_parser
     logic [15:0]          payload_offset_calc;
     logic [15:0]          min_roce_frame_len;
     logic [7:0]           opcode_raw;
+    logic [7:0]           ingress_dsfield;
+    logic                 ingress_ecn_valid;
 
     assign frame_ready  = !meta_valid || meta_ready;
     assign accept_frame = frame_valid && frame_ready;
@@ -67,6 +69,8 @@ module roce_packet_parser
         vlan_present      = (frame_data[111:96] == ETH_TYPE_VLAN) || (frame_data[111:96] == ETH_TYPE_QINQ);
         inner_ethertype   = vlan_present ? frame_data[143:128] : frame_data[111:96];
         vlan_tci          = vlan_present ? frame_data[127:112] : 16'h0000;
+        ingress_dsfield   = 8'h00;
+        ingress_ecn_valid = 1'b0;
         roce_header_offset = ETH_BASE_HDR_BYTES + (vlan_present ? VLAN_HDR_BYTES : 16'd0)
                            + IPV4_HDR_BYTES + UDP_HDR_BYTES + BTH_HDR_BYTES;
 
@@ -103,6 +107,13 @@ module roce_packet_parser
         if (vlan_present) begin
             meta_next.ip_version  = frame_data[151:148];
             meta_next.ip_ihl      = frame_data[147:144];
+            if (inner_ethertype == ETH_TYPE_IPV6) begin
+                ingress_dsfield   = frame_data[147:140];
+                ingress_ecn_valid = 1'b1;
+            end else begin
+                ingress_dsfield   = frame_data[159:152];
+                ingress_ecn_valid = (inner_ethertype == ETH_TYPE_IPV4);
+            end
             meta_next.ip_total_length = frame_data[175:160];
             meta_next.ip_protocol = frame_data[223:216];
             meta_next.ip_checksum = frame_data[239:224];
@@ -128,6 +139,13 @@ module roce_packet_parser
         end else begin
             meta_next.ip_version  = frame_data[119:116];
             meta_next.ip_ihl      = frame_data[115:112];
+            if (inner_ethertype == ETH_TYPE_IPV6) begin
+                ingress_dsfield   = frame_data[115:108];
+                ingress_ecn_valid = 1'b1;
+            end else begin
+                ingress_dsfield   = frame_data[127:120];
+                ingress_ecn_valid = (inner_ethertype == ETH_TYPE_IPV4);
+            end
             meta_next.ip_total_length = frame_data[143:128];
             meta_next.ip_protocol = frame_data[191:184];
             meta_next.ip_checksum = frame_data[207:192];
@@ -149,6 +167,12 @@ module roce_packet_parser
             meta_next.src_qpn      = frame_data[447:424];
             meta_next.imm_data     = frame_data[415:384];
         end
+
+        meta_next.ip_dsfield = ingress_dsfield;
+        meta_next.ipv6_traffic_class = (inner_ethertype == ETH_TYPE_IPV6) ? ingress_dsfield : 8'h00;
+        meta_next.ecn = ingress_dsfield[1:0];
+        meta_next.ecn_valid = ingress_ecn_valid;
+        meta_next.ecn_ce = ingress_ecn_valid && (ingress_dsfield[1:0] == ECN_CE);
 
         meta_next.has_reth = (opcode_raw == ROCE_OPCODE_RDMA_WRITE_ONLY) ||
                              (opcode_raw == ROCE_OPCODE_RDMA_WRITE_ONLY_IMM) ||
@@ -173,6 +197,11 @@ module roce_packet_parser
         end else if (frame_len < min_roce_frame_len) begin
             status_next = PKT_PARSE_STATUS_SHORT_FRAME;
             error_next  = 16'h0002;
+        end else if (inner_ethertype == ETH_TYPE_IPV6) begin
+            // TODO: 10.x 后续阶段再实现完整 IPv6 RoCEv2 header layout。
+            // 10.1 只要求 ingress ECN/CE detection，因此仍保留 ECN metadata。
+            status_next = PKT_PARSE_STATUS_UNSUPPORTED_LAYOUT;
+            error_next  = 16'h0003;
         end
         meta_next.status = status_next;
     end

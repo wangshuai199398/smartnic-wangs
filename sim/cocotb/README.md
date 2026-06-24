@@ -46,7 +46,7 @@
 | `test_dma_host_read_path.py` | `rtl/dma/dma_host_read_path.sv` | Send/RDMA Write protected segment 到 PCIe read request、read response 到 payload stream、tag/length/error 检查、payload backpressure、refcount release |
 | `test_dma_host_write_path.py` | `rtl/dma/dma_host_write_path.sv` | Recv/RDMA Read response protected segment 和 payload stream 到 PCIe write request、write completion 到 done、tag/error 检查、write backpressure、refcount release |
 | `test_dma_error_propagation.py` | `rtl/dma/dma_error_propagation.sv` | DMA error source 到 completion status 映射、fatal QP error request、completion backpressure、多 source 优先级 |
-| `test_roce_packet_parser.py` | `rtl/packet/roce_packet_parser.sv` | Ethernet/单层 VLAN/IPv4/UDP/BTH/RETH 字段提取、metadata 透传、NEED_MORE_DATA 状态 |
+| `test_roce_packet_parser.py` | `rtl/packet/roce_packet_parser.sv` | Ethernet/单层 VLAN/IPv4/IPv6 ECN/UDP/BTH/RETH 字段提取、metadata 透传、NEED_MORE_DATA 状态 |
 | `test_roce_ingress_validator.py` | `rtl/packet/roce_ingress_validator.sv` | EtherType、IP version/IHL/protocol、UDP port、BTH version、opcode、checksum、packet length 校验和 drop/accept ready/valid |
 | `test_roce_payload_extractor.py` | `rtl/packet/roce_payload_extractor.sv` | validated metadata + frame beat 到 transport metadata 和 receive-DMA payload stream 的转换、零 payload、multi-beat stub error、backpressure |
 | `test_roce_packet_builder.py` | `rtl/packet/roce_packet_builder.sv` | Ethernet/IPv4/UDP/BTH frame 构造、RETH、AETH/ACK、DETH、ImmDt、CNP、payload、unsupported opcode、multi-beat stub、backpressure |
@@ -60,6 +60,8 @@
 | `test_rc_immediate_engine.py` | `rtl/transport/rc_immediate_engine.sv` | SEND_WITH_IMM、RDMA_WRITE_WITH_IMM、0x11223344 byte order、RNR、remote write denial、normal SEND/WRITE no immediate CQE |
 | `test_ud_tx_engine.py` | `rtl/transport/ud_tx_engine.sv` | UD SEND、AH lookup、DETH Q_Key/source QPN、无 RC connection state、invalid AH、missing Q_Key、拒绝 UD RDMA ops |
 | `test_ud_rx_engine.py` | `rtl/transport/ud_rx_engine.sv` | UD receive DETH parsing、Q_Key validation、source QPN completion seed、missing RQ WQE、malformed/invalid DETH counters |
+| `test_congestion_stage10.py` | 第 10.1 阶段 ECN mock checks | IPv4 DS field、IPv6 traffic class、CE hook、malformed counter、非 ECN 透传 |
+| `test_ecn_ingress_marker.py` | `rtl/congestion/ecn_ingress_marker.sv` | CE mark hook、ECN/CE/malformed counter、非 CE 包透传 |
 
 ## 运行方式
 
@@ -74,6 +76,7 @@ make mr-test
 make dma-test
 make packet-test
 make transport-test
+make congestion-test
 ```
 
 或直接进入本目录运行：
@@ -87,6 +90,7 @@ make -C sim/cocotb mr-tests
 make -C sim/cocotb dma-tests
 make -C sim/cocotb packet-tests
 make -C sim/cocotb transport-tests
+make -C sim/cocotb congestion-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -139,6 +143,8 @@ make -C sim/cocotb test-rc-send-engine
 make -C sim/cocotb test-rc-recv-engine
 make -C sim/cocotb test-rc-rdma-read-engine
 make -C sim/cocotb test-rc-immediate-engine
+make -C sim/cocotb test-congestion-stage10
+make -C sim/cocotb test-ecn-ingress-marker
 ```
 
 ## 当前限制
@@ -169,12 +175,13 @@ make -C sim/cocotb test-rc-immediate-engine
 - DMA arbiter 测试只验证多 source request 到单个 grant 的调度策略和 starvation guard，不执行真实 host read/write/fetch，也不做 completion error propagation。
 - DMA host write path 测试只验证 protected segment 和 payload stream 到 PCIe write request 的转换、write completion、错误输出和 refcount release，不实现真实 PCIe memory write、跨 segment 拼接、PMTU/4KB split 或 completion error propagation。
 - DMA error propagation 测试只验证 DMA 子模块错误到 completion status / QP error request 的映射，不实现 retry engine、remote error packet、RoCEv2 NAK 或 async event queue。
-- Packet parser 测试只验证 8.1 的首个 512-bit beat 字段提取和 metadata 输出，不实现 8.2 ingress validation、8.3 payload extraction、8.4 packet builder 或 8.5 ICRC 校验。
+- Packet parser 测试只验证 8.1/10.1 的首个 512-bit beat 字段提取和 ECN metadata 输出，不实现完整 IPv6 RoCEv2 layout、8.2 ingress validation、8.3 payload extraction、8.4 packet builder 或 8.5 ICRC 校验。
 - Ingress validator 测试只验证 8.2 的 metadata 合法性裁决和 drop/accept ready/valid，不实现真实 checksum 计算器、payload extraction、packet builder 或 transport/QP 状态机。
 - Payload extractor 测试只验证 8.3 的接口转换，不实现完整多 beat payload reassembly、真实 receive DMA 写入、第 9 阶段 transport 状态机或 packet builder。
 - Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
+- ECN ingress marker 测试只验证 10.1 的 CE mark propagation 和轻量 counter，不生成 CNP、不更新 DCQCN rate、不映射 CSR counter。
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
 - RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。

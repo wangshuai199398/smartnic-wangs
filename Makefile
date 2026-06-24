@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test driver userspace regression coverage clean
+.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test driver userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -13,7 +13,7 @@ verilator:
 	@echo "[verilator] Verilator 仿真构建占位：后续会编译 smartnic_top 和模块级测试平台。"
 
 cocotb:
-	@echo "[cocotb] 运行 Cocotb PCIe 控制面、Doorbell、QP、CQ、MR、DMA、Packet parser 和 Transport 单元测试入口。"
+	@echo "[cocotb] 运行 Cocotb PCIe 控制面、Doorbell、QP、CQ、MR、DMA、Packet parser、Transport 和 Congestion 单元测试入口。"
 	@$(MAKE) -C sim/cocotb pcie-control-plane-tests
 	@$(MAKE) -C sim/cocotb doorbell-tests
 	@$(MAKE) -C sim/cocotb qp-tests
@@ -22,6 +22,7 @@ cocotb:
 	@$(MAKE) -C sim/cocotb dma-tests
 	@$(MAKE) -C sim/cocotb packet-tests
 	@$(MAKE) -C sim/cocotb transport-tests
+	@$(MAKE) -C sim/cocotb congestion-tests
 
 pcie-test:
 	@echo "[pcie-test] 运行 PCIe endpoint/control-plane 模块级测试入口。"
@@ -54,6 +55,10 @@ packet-test:
 transport-test:
 	@echo "[transport-test] 运行 RoCEv2 transport 模块级测试入口。"
 	@$(MAKE) -C sim/cocotb transport-tests
+
+congestion-test:
+	@echo "[congestion-test] 运行 ECN/congestion receive-path 模块级测试入口。"
+	@$(MAKE) -C sim/cocotb congestion-tests
 
 driver:
 	@echo "[driver] 进入 Linux driver 子目录。"

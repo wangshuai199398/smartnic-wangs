@@ -14,11 +14,13 @@ ROCE_OPCODE_SEND_ONLY = 0x04
 ROCE_OPCODE_SEND_ONLY_IMM = 0x05
 ROCE_OPCODE_RDMA_WRITE_ONLY = 0x0A
 ETH_TYPE_IPV4 = 0x0800
+ETH_TYPE_IPV6 = 0x86DD
 ETH_TYPE_VLAN = 0x8100
 ROCE_UDP_PORT = 4791
 
 PKT_PARSE_STATUS_OK = 0
 PKT_PARSE_STATUS_NEED_MORE_DATA = 1
+PKT_PARSE_STATUS_UNSUPPORTED_LAYOUT = 3
 
 
 PACKET_META_FIELDS = [
@@ -35,6 +37,11 @@ PACKET_META_FIELDS = [
     ("vlan_tci", 16),
     ("ip_version", 4),
     ("ip_ihl", 4),
+    ("ip_dsfield", 8),
+    ("ipv6_traffic_class", 8),
+    ("ecn", 2),
+    ("ecn_valid", 1),
+    ("ecn_ce", 1),
     ("ip_total_length", 16),
     ("ip_protocol", 8),
     ("ip_checksum", 16),
@@ -81,13 +88,14 @@ def extract_field(fields, packed, name):
     raise KeyError(name)
 
 
-def build_ipv4_roce_frame(opcode=ROCE_OPCODE_SEND_ONLY, with_vlan=False):
+def build_ipv4_roce_frame(opcode=ROCE_OPCODE_SEND_ONLY, with_vlan=False, dsfield=0):
     data = 0
     data = set_bits(data, 111, 96, ETH_TYPE_VLAN if with_vlan else ETH_TYPE_IPV4)
 
     if with_vlan:
         data = set_bits(data, 127, 112, 0x123)
         data = set_bits(data, 143, 128, ETH_TYPE_IPV4)
+        data = set_bits(data, 159, 152, dsfield)
         data = set_bits(data, 271, 240, 0x0A000001)
         data = set_bits(data, 303, 272, 0x0A000002)
         data = set_bits(data, 319, 304, 0xC001)
@@ -100,6 +108,7 @@ def build_ipv4_roce_frame(opcode=ROCE_OPCODE_SEND_ONLY, with_vlan=False):
         data = set_bits(data, 511, 480, 0xABCDEF01)
         frame_len = 86
     else:
+        data = set_bits(data, 127, 120, dsfield)
         data = set_bits(data, 239, 208, 0x0A000001)
         data = set_bits(data, 271, 240, 0x0A000002)
         data = set_bits(data, 287, 272, 0xC001)
@@ -114,6 +123,14 @@ def build_ipv4_roce_frame(opcode=ROCE_OPCODE_SEND_ONLY, with_vlan=False):
         frame_len = 82
 
     return data, frame_len
+
+
+def build_ipv6_roce_frame(traffic_class=0):
+    data = 0
+    data = set_bits(data, 111, 96, ETH_TYPE_IPV6)
+    data = set_bits(data, 119, 116, 6)
+    data = set_bits(data, 115, 108, traffic_class)
+    return data, 90
 
 
 async def reset_dut(dut):
@@ -187,6 +204,33 @@ async def parses_single_vlan_header(dut):
     assert extract_field(PACKET_META_FIELDS, meta, "ethertype") == ETH_TYPE_IPV4
     assert extract_field(PACKET_META_FIELDS, meta, "udp_dst_port") == ROCE_UDP_PORT
     assert extract_field(PACKET_META_FIELDS, meta, "dest_qpn") == 0x123456
+
+
+@cocotb.test()
+async def parses_ipv4_ecn_ce_mark(dut):
+    await reset_dut(dut)
+    data, frame_len = build_ipv4_roce_frame(ROCE_OPCODE_SEND_ONLY, with_vlan=False, dsfield=0x03)
+    await send_frame(dut, data, frame_len)
+    meta = await wait_meta(dut)
+
+    assert extract_field(PACKET_META_FIELDS, meta, "ip_dsfield") == 0x03
+    assert extract_field(PACKET_META_FIELDS, meta, "ecn") == 0x03
+    assert extract_field(PACKET_META_FIELDS, meta, "ecn_valid") == 1
+    assert extract_field(PACKET_META_FIELDS, meta, "ecn_ce") == 1
+
+
+@cocotb.test()
+async def parses_ipv6_traffic_class_ecn_before_unsupported_layout_drop(dut):
+    await reset_dut(dut)
+    data, frame_len = build_ipv6_roce_frame(traffic_class=0xAB)
+    await send_frame(dut, data, frame_len)
+    meta = await wait_meta(dut)
+
+    assert extract_field(PACKET_META_FIELDS, meta, "ethertype") == ETH_TYPE_IPV6
+    assert extract_field(PACKET_META_FIELDS, meta, "status") == PKT_PARSE_STATUS_UNSUPPORTED_LAYOUT
+    assert extract_field(PACKET_META_FIELDS, meta, "ipv6_traffic_class") == 0xAB
+    assert extract_field(PACKET_META_FIELDS, meta, "ecn") == 0x03
+    assert extract_field(PACKET_META_FIELDS, meta, "ecn_ce") == 1
 
 
 @cocotb.test()

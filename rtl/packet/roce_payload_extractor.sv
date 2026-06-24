@@ -89,6 +89,9 @@ module roce_payload_extractor
         payload_next.opcode         = meta_in.opcode;
         payload_next.status         = PKT_PAYLOAD_OK;
         payload_next.error_code     = 16'h0000;
+        payload_next.ecn            = meta_in.ecn;
+        payload_next.ecn_valid      = meta_in.ecn_valid;
+        payload_next.ecn_ce         = meta_in.ecn_ce;
         payload_next.payload_len    = meta_in.payload_len;
         payload_next.valid_bytes    = meta_in.payload_len;
         payload_next.byte_offset    = 16'd0;
