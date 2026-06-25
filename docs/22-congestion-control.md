@@ -302,3 +302,34 @@ Per-priority 状态：
 - 不解析真实 MAC PFC control frame；`pfc_event_*` 是测试和未来 MAC control path 的注入接口。
 - 不实现完整多队列 TX scheduler，只提供 priority gate 和 backpressure 信号。
 - 不实现 PFC deadlock detection、watchdog 或 per-priority buffer accounting。
+
+## 10.6 Congestion Control Test Suite
+
+`sim/cocotb/test_congestion_integration.py` 是第 10 阶段的轻量集成测试套件。它使用 Python mock 模型串起 10.1 到 10.5 的语义，保证在没有 cocotb/Verilator 的环境中也能检查拥塞控制主链路。
+
+覆盖场景：
+
+| 场景 | 检查点 |
+| --- | --- |
+| ECN -> CNP | CE-marked metadata 生成 congestion hook，CNP build request 使用正确 QPN |
+| CNP -> DCQCN | 合法 CNP event 触发 rate decrease，连续 CNP 时 current_rate clamp 到 min_rate |
+| Recovery | 停止 CNP 后 additive increase 逐步恢复到 target_rate |
+| Pacing | token bucket 根据 DCQCN rate 进行 allow/throttle 判定并更新 counter |
+| PFC | PAUSE 反压 TX，RESUME 后恢复调度，验证没有永久 stall |
+| Negative | malformed CNP 被 drop，DCQCN state/counter 不被污染 |
+| Chain | ECN -> CNP -> DCQCN rate update -> pacing throttle 的最小端到端链路 |
+
+该测试套件不替代 RTL module-level cocotb tests。工具链存在时，`make congestion-test` 还会运行：
+
+- `test_ecn_ingress_marker.py`
+- `test_cnp_packet_generator.py`
+- `test_cnp_receive_classifier.py`
+- `test_dcqcn_state_machine.py`
+- `test_tx_pacer_token_bucket.py`
+- `test_pfc_pause_scheduler.py`
+
+当前限制：
+
+- 集成测试使用 mock/stub，不实例化完整 MAC/PFC/RoCEv2 top。
+- 不检查真实 PFC control frame 编解码，也不检查真实 TX scheduler 队列公平性。
+- `no deadlock` 在 10.6 中定义为 PAUSE 后请求被 stall、RESUME 后同 priority 可再次 schedule；完整 watchdog/deadlock detection 属于后续 top-level/verification 阶段。
