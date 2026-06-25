@@ -1,6 +1,6 @@
 # Congestion Control
 
-本文件记录第 10 阶段拥塞控制路径。10.1 只实现 ingress ECN detection 和 CE mark propagation，不生成 CNP，不实现 DCQCN rate update，也不处理 PFC pause。
+本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，以及 10.2 CNP packet generation / receive classification。不实现 DCQCN rate update，也不处理 PFC pause。
 
 ## 10.1 ECN Ingress Detection
 
@@ -55,8 +55,97 @@ IPv6 当前只完成 traffic class/ECN detection。因为项目的 8.x parser/va
 
 ## 边界
 
-- 不生成 CNP；10.2 负责 CNP packet generation 和 receive classification。
+- CNP 生成只输出到 packet builder 请求，不直接驱动 MAC TX top。
 - 不实现 DCQCN alpha/rate state；10.3 负责。
 - 不实现 transmit pacing；10.4 负责。
 - 不实现 PFC pause/resume；10.5 负责。
 - 不改变普通非 ECN 包的 parser、validator、payload extraction 或 transport 行为。
+
+## 10.2 CNP Packet Generation
+
+`rtl/congestion/cnp_packet_generator.sv` 把拥塞触发事件转换为 `packet_build_req_t`：
+
+```text
+ecn_ingress_marker.congestion_mark_*
+queue_congestion_*
+port_congestion_*
+  -> cnp_packet_generator
+  -> packet_build_req_t(opcode=ROCE_OPCODE_CNP)
+  -> roce_packet_builder
+```
+
+触发来源：
+
+| 来源 | congestion_type | 当前输入 |
+| --- | --- | --- |
+| ECN CE mark | `CNP_CONGESTION_ECN` | `ce_mark_valid` |
+| Queue threshold | `CNP_CONGESTION_QUEUE` | `queue_congestion_valid` |
+| Port threshold | `CNP_CONGESTION_PORT` | `port_congestion_valid` |
+
+生成的 CNP build request 保留：
+
+- `desc_id`
+- `qpn`
+- `cqn`
+- `owner_function`
+- `pd_id`
+- `opcode=ROCE_OPCODE_CNP`
+- `dest_qpn=trigger_qpn`
+- `src_qpn=trigger_qpn`，作为最小 source QP/port 标识占位
+- `imm_data[1:0]=congestion_type`，用于 10.2 原型阶段携带拥塞类型
+
+为了避免 CNP storm，generator 维护一个按 QPN 低位索引的 cooldown table。若同一 QP 在 `cnp_rate_limit_cycles` 内再次触发，模块消费该 trigger、递增 `cnp_rate_limited`，但不输出新的 CNP。
+
+Debug counters：
+
+| Counter | 含义 |
+| --- | --- |
+| `cnp_generated_total` | 成功生成的 CNP build request 数 |
+| `cnp_rate_limited` | 被 per-QP cooldown 抑制的 trigger 数 |
+
+## 10.2 CNP Receive Classification
+
+`rtl/congestion/cnp_receive_classifier.sv` 对 ingress metadata 做 CNP 旁路分类：
+
+```text
+packet_meta_t
+  -> cnp_receive_classifier
+  -> QP lookup hook
+  -> cnp_event_t
+  -> DCQCN state machine input queue (10.3)
+```
+
+识别条件：
+
+- `opcode == ROCE_OPCODE_CNP`
+- `udp_dst_port == ROCEV2_UDP_PORT`
+- `packet_parse_status == PKT_PARSE_STATUS_OK`
+
+校验规则：
+
+| 情况 | 行为 |
+| --- | --- |
+| 非 CNP packet | 输出 `CNP_CLASS_STATUS_NOT_CNP` drop/debug，不计入 invalid CNP |
+| CNP malformed | 输出 drop/debug，递增 invalid counter |
+| QP lookup miss / inactive | 输出 drop/debug，递增 invalid counter |
+| 有效 CNP | 输出 `cnp_event_t` 到 DCQCN input |
+
+`cnp_event_t` 保留 QPN、owner function、PD、source QPN、congestion type 和 status。10.3 将消费该事件并更新 DCQCN alpha/rate；10.2 不实现速率变化。
+
+Debug counters：
+
+| Counter | 含义 |
+| --- | --- |
+| `cnp_received_total` | 有效 CNP 事件总数 |
+| `cnp_invalid_total` | malformed 或 QP miss CNP 总数 |
+| `cnp_received_count` | 当前 QPN 哈希槽的有效 CNP 计数 |
+| `cnp_dropped_invalid_count` | 当前 QPN 哈希槽的无效 CNP 计数 |
+
+## 10.2 Test Hooks
+
+测试注入点：
+
+- `ce_mark_valid`：模拟 CE-marked packet arrival。
+- `queue_congestion_valid` / `port_congestion_valid`：模拟 queue/port threshold exceeded。
+- `meta_valid + packet_meta_t(opcode=CNP)`：模拟 synthetic CNP packet injection。
+- malformed CNP：通过错误 UDP port、parser status 或 QP miss 注入。

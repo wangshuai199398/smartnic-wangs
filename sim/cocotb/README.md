@@ -62,6 +62,8 @@
 | `test_ud_rx_engine.py` | `rtl/transport/ud_rx_engine.sv` | UD receive DETH parsing、Q_Key validation、source QPN completion seed、missing RQ WQE、malformed/invalid DETH counters |
 | `test_congestion_stage10.py` | 第 10.1 阶段 ECN mock checks | IPv4 DS field、IPv6 traffic class、CE hook、malformed counter、非 ECN 透传 |
 | `test_ecn_ingress_marker.py` | `rtl/congestion/ecn_ingress_marker.sv` | CE mark hook、ECN/CE/malformed counter、非 CE 包透传 |
+| `test_cnp_packet_generator.py` | `rtl/congestion/cnp_packet_generator.sv` | CE/queue/port trigger 到 CNP build request、congestion type、per-QP rate limit |
+| `test_cnp_receive_classifier.py` | `rtl/congestion/cnp_receive_classifier.sv` | CNP opcode/UDP port 分类、QP lookup hit/miss、DCQCN event、invalid counter |
 
 ## 运行方式
 
@@ -145,6 +147,8 @@ make -C sim/cocotb test-rc-rdma-read-engine
 make -C sim/cocotb test-rc-immediate-engine
 make -C sim/cocotb test-congestion-stage10
 make -C sim/cocotb test-ecn-ingress-marker
+make -C sim/cocotb test-cnp-packet-generator
+make -C sim/cocotb test-cnp-receive-classifier
 ```
 
 ## 当前限制
@@ -181,7 +185,7 @@ make -C sim/cocotb test-ecn-ingress-marker
 - Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
-- ECN ingress marker 测试只验证 10.1 的 CE mark propagation 和轻量 counter，不生成 CNP、不更新 DCQCN rate、不映射 CSR counter。
+- ECN/CNP congestion 测试只验证 10.1/10.2 的 CE mark propagation、CNP build request、CNP receive classification 和轻量 counter，不更新 DCQCN rate、不发送真实 MAC packet、不映射 CSR counter。
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
 - RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。

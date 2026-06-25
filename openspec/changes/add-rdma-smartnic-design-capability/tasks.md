@@ -92,7 +92,7 @@
 ## 10. PFC ECN DCQCN and Scheduling
 
 - [x] 10.1 Implement ECN detection from ingress packets and pass congestion marks to transport and congestion logic.
-- [ ] 10.2 Implement CNP packet generation and CNP receive classification.
+- [x] 10.2 Implement CNP packet generation and CNP receive classification.
 - [ ] 10.3 Implement DCQCN state machine with configurable alpha, rate decrease, rate recovery, target rate, and minimum rate.
 - [ ] 10.4 Implement per-QP token bucket or equivalent transmit pacing.
 - [ ] 10.5 Implement PFC pause handling for configured priority and transmit scheduler backpressure.

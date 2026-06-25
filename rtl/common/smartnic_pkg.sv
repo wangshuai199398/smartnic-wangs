@@ -1791,6 +1791,43 @@ package smartnic_pkg;
         logic                   compatibility_limited; // 1 表示当前不是真实 ICRC，不能用于互操作。
     } packet_icrc_result_t;
 
+    parameter int CNP_RATE_LIMIT_W = 16; // CNP per-QP rate limit/cooldown 计数位宽。
+    parameter int CNP_COUNTER_W    = 32; // CNP debug counter 位宽。
+
+    typedef enum logic [1:0] {
+        CNP_CONGESTION_ECN    = 2'd0, // ECN CE mark 触发。
+        CNP_CONGESTION_QUEUE  = 2'd1, // queue-level threshold 触发。
+        CNP_CONGESTION_PORT   = 2'd2, // port-level threshold 触发。
+        CNP_CONGESTION_UNKNOWN = 2'd3 // 调试/保留。
+    } cnp_congestion_type_e;
+
+    typedef enum logic [3:0] {
+        CNP_GEN_STATUS_OK           = 4'd0, // CNP 生成请求成功。
+        CNP_GEN_STATUS_RATE_LIMITED = 4'd1, // per-QP rate limit 未到期。
+        CNP_GEN_STATUS_DISABLED     = 4'd2, // CNP 生成未使能。
+        CNP_GEN_STATUS_BACKPRESSURE = 4'd3  // 下游 builder 暂时不可接收。
+    } cnp_gen_status_e;
+
+    typedef enum logic [3:0] {
+        CNP_CLASS_STATUS_OK          = 4'd0, // 有效 CNP。
+        CNP_CLASS_STATUS_NOT_CNP     = 4'd1, // 不是 CNP packet。
+        CNP_CLASS_STATUS_MALFORMED   = 4'd2, // parser/UDP/opcode 字段不合法。
+        CNP_CLASS_STATUS_QP_MISS     = 4'd3, // 目标 QP 不存在或未激活。
+        CNP_CLASS_STATUS_BACKPRESSURE = 4'd4 // DCQCN 事件队列反压。
+    } cnp_class_status_e;
+
+    typedef struct packed {
+        logic [15:0]              desc_id;        // 来源 packet/descriptor ID。
+        logic [QP_ID_W-1:0]       qpn;            // 被 CNP 反馈影响的 QP。
+        logic [CQ_ID_W-1:0]       cqn;            // 调试/完成关联 CQN。
+        logic [VF_ID_W-1:0]       owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]       pd_id;          // Protection Domain。
+        cnp_congestion_type_e     congestion_type;// ECN/queue/port 拥塞来源。
+        logic [QP_ID_W-1:0]       source_qpn;     // CNP 来源 QP/port 标识，若未知则为 0。
+        cnp_class_status_e        status;         // 分类状态。
+        logic [15:0]              error_code;     // 错误码，成功为 0。
+    } cnp_event_t;
+
     parameter int RC_SEND_OUTSTANDING_DEPTH = 4; // 9.1 最小 RC send outstanding window 深度。
     parameter int RC_SEND_RETRY_TIMER_W = 16; // retry timer 计数位宽。
     parameter int RC_SEND_RETRY_COUNT_W = 8; // retry count 位宽。

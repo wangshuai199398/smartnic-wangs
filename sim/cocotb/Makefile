@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker test-cnp-packet-generator test-cnp-receive-classifier clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -138,6 +138,8 @@ congestion-tests:
 		echo "[cocotb] 未安装 Verilator，跳过 Congestion/ECN 单元测试。"; \
 	else \
 		$(MAKE) test-ecn-ingress-marker; \
+		$(MAKE) test-cnp-packet-generator; \
+		$(MAKE) test-cnp-receive-classifier; \
 	fi
 
 test-pcie-cfg:
@@ -419,6 +421,16 @@ test-ud-rx-engine:
 test-ecn-ingress-marker:
 	$(MAKE) TOPLEVEL=ecn_ingress_marker MODULE=test_ecn_ingress_marker \
 		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/congestion/ecn_ingress_marker.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cnp-packet-generator:
+	$(MAKE) TOPLEVEL=cnp_packet_generator MODULE=test_cnp_packet_generator \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/congestion/cnp_packet_generator.sv" \
+		-f $$(cocotb-config --makefiles)/Makefile.sim
+
+test-cnp-receive-classifier:
+	$(MAKE) TOPLEVEL=cnp_receive_classifier MODULE=test_cnp_receive_classifier \
+		VERILOG_SOURCES="$(RTL_COMMON) ../../rtl/congestion/cnp_receive_classifier.sv" \
 		-f $$(cocotb-config --makefiles)/Makefile.sim
 
 clean:
