@@ -12,6 +12,8 @@ PACER_STATUS_ALLOWED = "ALLOWED"
 PACER_STATUS_THROTTLED = "THROTTLED"
 PACER_STATUS_DISABLED = "DISABLED"
 PACER_STATUS_INVALID = "INVALID"
+PFC_STATE_ACTIVE = "ACTIVE"
+PFC_STATE_PAUSED = "PAUSED"
 
 
 def parse_ipv4_ecn(dsfield):
@@ -309,6 +311,73 @@ def test_pacer_refill_clamps_to_bucket_size():
     assert pacer.tokens_refilled == 100
 
 
+class PfcSchedulerModel:
+    def __init__(self):
+        self.pause_state = [PFC_STATE_ACTIVE] * 8
+        self.pause_timer = [0] * 8
+        self.pfc_pause_events = 0
+        self.pfc_resume_events = 0
+        self.tx_stalled_due_to_pfc = 0
+
+    def pause(self, priority, quanta):
+        self.pause_state[priority] = PFC_STATE_PAUSED
+        self.pause_timer[priority] = quanta
+        self.pfc_pause_events += 1
+
+    def resume(self, priority):
+        self.pause_state[priority] = PFC_STATE_ACTIVE
+        self.pause_timer[priority] = 0
+        self.pfc_resume_events += 1
+
+    def tick(self):
+        for priority, state in enumerate(self.pause_state):
+            if state == PFC_STATE_PAUSED and self.pause_timer[priority] > 0:
+                self.pause_timer[priority] -= 1
+                if self.pause_timer[priority] == 0:
+                    self.resume(priority)
+
+    def can_schedule(self, priority):
+        if self.pause_state[priority] == PFC_STATE_PAUSED:
+            self.tx_stalled_due_to_pfc += 1
+            return False
+        return True
+
+
+def test_pfc_pause_blocks_matching_priority():
+    sched = PfcSchedulerModel()
+    sched.pause(priority=3, quanta=8)
+
+    assert sched.can_schedule(3) is False
+    assert sched.tx_stalled_due_to_pfc == 1
+
+
+def test_pfc_resume_releases_priority():
+    sched = PfcSchedulerModel()
+    sched.pause(priority=3, quanta=8)
+    sched.resume(priority=3)
+
+    assert sched.can_schedule(3) is True
+    assert sched.pfc_pause_events == 1
+    assert sched.pfc_resume_events == 1
+
+
+def test_pfc_pause_does_not_block_other_priorities():
+    sched = PfcSchedulerModel()
+    sched.pause(priority=3, quanta=8)
+
+    assert sched.can_schedule(4) is True
+
+
+def test_pfc_timer_expiry_resumes_priority():
+    sched = PfcSchedulerModel()
+    sched.pause(priority=2, quanta=2)
+    sched.tick()
+    assert sched.can_schedule(2) is False
+    sched.tick()
+    assert sched.can_schedule(2) is True
+    assert sched.pfc_resume_events == 1
+
+
 def main():
     test_ipv4_ce_detection()
     test_ipv6_traffic_class_ce_detection()
@@ -325,7 +394,11 @@ def main():
     test_pacer_refills_tokens_from_dcqcn_rate_and_allows_packet()
     test_pacer_throttles_when_packet_exceeds_tokens()
     test_pacer_refill_clamps_to_bucket_size()
-    print("[stage10] ECN/CNP/DCQCN/pacing semantic checks passed")
+    test_pfc_pause_blocks_matching_priority()
+    test_pfc_resume_releases_priority()
+    test_pfc_pause_does_not_block_other_priorities()
+    test_pfc_timer_expiry_resumes_priority()
+    print("[stage10] ECN/CNP/DCQCN/pacing/PFC semantic checks passed")
 
 
 if __name__ == "__main__":

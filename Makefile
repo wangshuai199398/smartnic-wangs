@@ -57,7 +57,7 @@ transport-test:
 	@$(MAKE) -C sim/cocotb transport-tests
 
 congestion-test:
-	@echo "[congestion-test] 运行 ECN/CNP/DCQCN/pacing 拥塞控制模块级测试入口。"
+	@echo "[congestion-test] 运行 ECN/CNP/DCQCN/pacing/PFC 拥塞控制模块级测试入口。"
 	@$(MAKE) -C sim/cocotb congestion-tests
 
 driver:

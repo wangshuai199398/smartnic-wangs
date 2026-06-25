@@ -1880,6 +1880,16 @@ package smartnic_pkg;
         pacer_status_e            status;         // allow/throttle/invalid。
     } pacer_decision_t;
 
+    parameter int PFC_PRIORITY_COUNT = 8; // 802.1Qbb 定义 8 个 traffic class/priority。
+    parameter int PFC_PRIORITY_W = 3; // PFC priority 编号位宽。
+    parameter int PFC_TIMER_W = 16; // pause quanta/timer 原型计数位宽。
+    parameter int PFC_COUNTER_W = 32; // PFC debug counter 位宽。
+
+    typedef enum logic [0:0] {
+        PFC_STATE_ACTIVE = 1'b0, // 该 priority 可调度 TX。
+        PFC_STATE_PAUSED = 1'b1  // 该 priority 暂停，TX scheduler 必须反压。
+    } pfc_pause_state_e;
+
     parameter int RC_SEND_OUTSTANDING_DEPTH = 4; // 9.1 最小 RC send outstanding window 深度。
     parameter int RC_SEND_RETRY_TIMER_W = 16; // retry timer 计数位宽。
     parameter int RC_SEND_RETRY_COUNT_W = 8; // retry count 位宽。

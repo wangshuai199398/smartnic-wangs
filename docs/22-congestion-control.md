@@ -1,6 +1,6 @@
 # Congestion Control
 
-本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，10.2 CNP packet generation / receive classification，10.3 per-QP DCQCN state machine，以及 10.4 per-QP token bucket transmit pacing。不处理 PFC pause。
+本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，10.2 CNP packet generation / receive classification，10.3 per-QP DCQCN state machine，10.4 per-QP token bucket transmit pacing，以及 10.5 PFC pause handling / scheduler backpressure。
 
 ## 10.1 ECN Ingress Detection
 
@@ -57,7 +57,7 @@ IPv6 当前只完成 traffic class/ECN detection。因为项目的 8.x parser/va
 
 - CNP 生成只输出到 packet builder 请求，不直接驱动 MAC TX top。
 - DCQCN 只输出 per-QP `current_rate` update；10.4 token bucket 使用该 rate 做发送准入判定。
-- 不实现 PFC pause/resume；10.5 负责。
+- PFC pause/resume 只在 10.5 的 TX scheduler gate 中建模，不实现真实 MAC control frame RX/TX。
 - 不改变普通非 ECN 包的 parser、validator、payload extraction 或 transport 行为。
 
 ## 10.2 CNP Packet Generation
@@ -259,3 +259,46 @@ Debug counters：
 - `rate` 单位是原型抽象 token/tick，尚未映射到真实 Gbps、端口时钟或 packet scheduler credit。
 - bucket 表按 QPN 低位索引，未实现 collision walk；后续资源管理/CSR 阶段可以替换为更完整的 per-QP table。
 - `THROTTLED` 只输出判定，不实现真实 TX 队列暂停/恢复，这部分属于后续 transmit scheduler/top 集成。
+
+## 10.5 PFC Pause Handling and Scheduler Backpressure
+
+`rtl/congestion/pfc_pause_scheduler.sv` 在 TX scheduler 和 10.4 token bucket 之间放置一个 per-priority gate：
+
+```text
+PFC PAUSE/RESUME event(priority, quanta)
+  -> pfc_pause_scheduler.pause_state[priority]
+TX scheduler request(qp_priority, pacer_tx_req_t)
+  -> if pause_state[qp_priority] == PAUSED: backpressure, do not call token bucket
+  -> else: forward request to tx_pacer_token_bucket
+  -> pacer decision returns to TX scheduler
+```
+
+PFC priority 使用 802.1Qbb 的 8 个 traffic class，当前以 `tx_qp_priority` 输入表示 QP 到 priority 的映射。真实映射来源可以来自后续 CSR、QP context 或 service level/AH 配置；10.5 只实现调度点上的判断。
+
+Per-priority 状态：
+
+| 字段 | 含义 |
+| --- | --- |
+| `pause_state[priority]` | `ACTIVE` 或 `PAUSED` |
+| `pause_timer[priority]` | pause quanta/timer，非 0 时每周期递减 |
+| `pfc_pause_events` | 收到 PAUSE 事件次数 |
+| `pfc_resume_events` | 收到显式 RESUME 或 timer 到期恢复次数 |
+| `tx_stalled_due_to_pfc` | TX 请求因 priority paused 被反压的次数 |
+
+行为规则：
+
+| 事件/条件 | 行为 |
+| --- | --- |
+| PFC PAUSE | 将该 priority 置为 `PAUSED`，加载 pause timer |
+| PFC RESUME | 将该 priority 置为 `ACTIVE`，清 timer |
+| pause timer 到 0 | 自动恢复为 `ACTIVE`，计入 resume counter |
+| TX 请求 priority 为 `PAUSED` | `tx_req_ready=0`，`pacer_req_valid=0`，上游 scheduler 被反压 |
+| TX 请求 priority 为 `ACTIVE` | 请求透传到 10.4 token bucket |
+
+10.5 选择的 token bucket backpressure 策略是 **freeze**：暂停期间不向 `tx_pacer_token_bucket` 发请求，因此 token 不被消费，也不基于暂停期间的 TX 请求触发 refill。恢复后由 scheduler 再次提交请求，token bucket 根据新的 `time_now` 继续正常 pacing。
+
+当前限制：
+
+- 不解析真实 MAC PFC control frame；`pfc_event_*` 是测试和未来 MAC control path 的注入接口。
+- 不实现完整多队列 TX scheduler，只提供 priority gate 和 backpressure 信号。
+- 不实现 PFC deadlock detection、watchdog 或 per-priority buffer accounting。
