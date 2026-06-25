@@ -1,6 +1,6 @@
 # Congestion Control
 
-本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，以及 10.2 CNP packet generation / receive classification。不实现 DCQCN rate update，也不处理 PFC pause。
+本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，10.2 CNP packet generation / receive classification，以及 10.3 per-QP DCQCN state machine。不实现 10.4 transmit pacing，也不处理 PFC pause。
 
 ## 10.1 ECN Ingress Detection
 
@@ -56,7 +56,7 @@ IPv6 当前只完成 traffic class/ECN detection。因为项目的 8.x parser/va
 ## 边界
 
 - CNP 生成只输出到 packet builder 请求，不直接驱动 MAC TX top。
-- 不实现 DCQCN alpha/rate state；10.3 负责。
+- DCQCN 只输出 per-QP `current_rate` update；真正 transmit pacing 由 10.4 负责。
 - 不实现 transmit pacing；10.4 负责。
 - 不实现 PFC pause/resume；10.5 负责。
 - 不改变普通非 ECN 包的 parser、validator、payload extraction 或 transport 行为。
@@ -149,3 +149,59 @@ Debug counters：
 - `queue_congestion_valid` / `port_congestion_valid`：模拟 queue/port threshold exceeded。
 - `meta_valid + packet_meta_t(opcode=CNP)`：模拟 synthetic CNP packet injection。
 - malformed CNP：通过错误 UDP port、parser status 或 QP miss 注入。
+
+## 10.3 DCQCN State Machine
+
+`rtl/congestion/dcqcn_state_machine.sv` 维护一个原型阶段的 per-QP congestion 表。表项按 QPN 低位索引，保存：
+
+| 字段 | 含义 |
+| --- | --- |
+| `current_rate` | 当前发送速率，输出给 10.4 pacing/token bucket |
+| `target_rate` | 恢复目标速率 |
+| `min_rate` | CNP 降速后的最低速率 |
+| `ai_rate` | additive increase 步长 |
+| `alpha` | DCQCN alpha，使用定点抽象值 |
+| `state` | `NORMAL` / `CONGESTED` / `RECOVERY` |
+
+控制面通过 `config_valid/config_ready` 写入初值。后续 11.x/12.x 可以把该接口连接到 BAR2 CSR 或 mailbox；当前 10.3 不定义 ABI。
+
+### CNP Update
+
+当 10.2 classifier 输出 `cnp_event_t`：
+
+```text
+cnp_event_t
+  -> dcqcn_state_machine
+  -> rate_update(current_rate, alpha, state)
+  -> 10.4 pacing
+```
+
+更新规则：
+
+```text
+state        = CONGESTED
+current_rate = max(current_rate / 2, min_rate)
+alpha        = alpha - (alpha >> g) + (alpha_max >> g)
+```
+
+这里的 `g` 来自 `config_alpha_g_shift`。完整 DCQCN 参数化、精确定点格式和 rate unit 校准留给后续原型收敛。
+
+### Recovery
+
+`recovery_tick_valid` 表示一个 QP 在恢复周期内没有新的 CNP 或由恢复定时器驱动：
+
+```text
+current_rate = min(current_rate + ai_rate, target_rate)
+state        = NORMAL if current_rate == target_rate else RECOVERY
+```
+
+该接口有意使用显式 `qpn` tick，便于单元测试和后续接入扫描器或定时器。
+
+### Counters
+
+| Counter | 含义 |
+| --- | --- |
+| `cnp_events` | 被 DCQCN 消费的 CNP 事件数 |
+| `rate_decrease` | multiplicative decrease 次数 |
+| `rate_increase` | additive increase 次数 |
+| `state_transitions` | NORMAL/CONGESTED/RECOVERY 状态变化次数 |

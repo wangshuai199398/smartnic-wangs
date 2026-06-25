@@ -1828,6 +1828,27 @@ package smartnic_pkg;
         logic [15:0]              error_code;     // 错误码，成功为 0。
     } cnp_event_t;
 
+    parameter int DCQCN_RATE_W = 32; // DCQCN rate 定点/抽象速率位宽。
+    parameter int DCQCN_ALPHA_W = 16; // DCQCN alpha 位宽，最大值表示 1.0。
+    parameter logic [DCQCN_ALPHA_W-1:0] DCQCN_ALPHA_MAX = {DCQCN_ALPHA_W{1'b1}}; // alpha 饱和值。
+    parameter int DCQCN_COUNTER_W = 32; // DCQCN debug counter 位宽。
+
+    typedef enum logic [1:0] {
+        DCQCN_STATE_NORMAL    = 2'd0, // 已恢复到 target_rate。
+        DCQCN_STATE_CONGESTED = 2'd1, // 刚收到 CNP，执行 multiplicative decrease。
+        DCQCN_STATE_RECOVERY  = 2'd2  // recovery timer 驱动 additive increase。
+    } dcqcn_state_e;
+
+    typedef struct packed {
+        logic [QP_ID_W-1:0]       qpn;            // 被更新的 QP。
+        logic [VF_ID_W-1:0]       owner_function; // 所属 PF/VF function。
+        logic [DCQCN_RATE_W-1:0]  current_rate;   // 当前速率，供 10.4 pacing 使用。
+        logic [DCQCN_RATE_W-1:0]  target_rate;    // 目标速率。
+        logic [DCQCN_RATE_W-1:0]  min_rate;       // 下限速率。
+        logic [DCQCN_ALPHA_W-1:0] alpha;          // DCQCN alpha。
+        dcqcn_state_e             state;          // NORMAL/CONGESTED/RECOVERY。
+    } dcqcn_rate_update_t;
+
     parameter int RC_SEND_OUTSTANDING_DEPTH = 4; // 9.1 最小 RC send outstanding window 深度。
     parameter int RC_SEND_RETRY_TIMER_W = 16; // retry timer 计数位宽。
     parameter int RC_SEND_RETRY_COUNT_W = 8; // retry count 位宽。
