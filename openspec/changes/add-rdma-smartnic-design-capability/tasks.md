@@ -100,10 +100,10 @@
 
 ## 11. Top-Level RTL Integration
 
-- [ ] 11.1 Implement `smartnic_top` with all major RTL blocks instantiated and connected through stable internal interfaces.
-- [ ] 11.2 Connect PCIe BAR/CSR control path to QP, CQ, MR, AH, MSI-X, SR-IOV, and congestion-control registers.
-- [ ] 11.3 Connect Doorbell path to QP SQ/RQ and CQ arm logic.
-- [ ] 11.4 Connect QP, DMA, packet, transport, completion, and CQ managers for RC Send/Recv minimal loop.
+- [x] 11.1 Implement `smartnic_top` with all major RTL blocks instantiated and connected through stable internal interfaces.
+- [x] 11.2 Connect PCIe BAR/CSR control path to QP, CQ, MR, AH, MSI-X, SR-IOV, and congestion-control registers.
+- [x] 11.3 Connect Doorbell path to QP SQ/RQ and CQ arm logic.
+- [x] 11.4 Connect QP, DMA, packet, transport, completion, and CQ managers for RC Send/Recv minimal loop.
 - [ ] 11.5 Connect RDMA Write and RDMA Read datapaths.
 - [ ] 11.6 Connect UD transmit and receive datapaths.
 - [ ] 11.7 Add top-level tests for reset, CSR command, Doorbell-to-CQE minimal loop, RC Send, RDMA Write, RDMA Read, UD Send, and MSI-X completion interrupt.

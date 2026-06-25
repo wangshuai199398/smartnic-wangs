@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test driver userspace regression coverage clean
+.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -23,6 +23,7 @@ cocotb:
 	@$(MAKE) -C sim/cocotb packet-tests
 	@$(MAKE) -C sim/cocotb transport-tests
 	@$(MAKE) -C sim/cocotb congestion-tests
+	@$(MAKE) -C sim/cocotb top-tests
 
 pcie-test:
 	@echo "[pcie-test] 运行 PCIe endpoint/control-plane 模块级测试入口。"
@@ -59,6 +60,10 @@ transport-test:
 congestion-test:
 	@echo "[congestion-test] 运行 ECN/CNP/DCQCN/pacing/PFC 拥塞控制模块级测试入口。"
 	@$(MAKE) -C sim/cocotb congestion-tests
+
+top-test:
+	@echo "[top-test] 运行 smartnic_top 结构集成检查。"
+	@$(MAKE) -C sim/cocotb top-tests
 
 driver:
 	@echo "[driver] 进入 Linux driver 子目录。"

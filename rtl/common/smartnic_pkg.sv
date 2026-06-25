@@ -109,6 +109,22 @@ package smartnic_pkg;
     parameter logic [31:0] CSR_MB_TIMEOUT_LIMIT = 32'd1024; // mailbox BUSY 状态最大等待周期。
     parameter logic [31:0] CSR_MB_MIN_BUSY_CYCLES = 32'd1; // 原型阶段命令最少 BUSY 周期。
 
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_QP_BASE = 32'h0000_1000; // QP 管理寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_QP_SIZE = 32'h0000_1000; // QP 管理寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_CQ_BASE = 32'h0000_2000; // CQ 管理寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_CQ_SIZE = 32'h0000_1000; // CQ 管理寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MR_BASE = 32'h0000_3000; // MR/MW 管理寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MR_SIZE = 32'h0000_1000; // MR/MW 管理寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_AH_BASE = 32'h0000_4000; // UD Address Handle 表寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_AH_SIZE = 32'h0000_1000; // UD Address Handle 表寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MSIX_BASE = 32'h0000_5000; // MSI-X 控制寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_MSIX_SIZE = 32'h0000_1000; // MSI-X 控制寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_SRIOV_BASE = 32'h0000_6000; // SR-IOV PF/VF 控制寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_SRIOV_SIZE = 32'h0000_1000; // SR-IOV PF/VF 控制寄存器窗口大小。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_CONGESTION_BASE = 32'h0000_7000; // ECN/CNP/DCQCN/PFC 控制寄存器窗口起始 offset。
+    parameter logic [PCIE_BAR_OFFSET_W-1:0] CSR_CONGESTION_SIZE = 32'h0000_1000; // ECN/CNP/DCQCN/PFC 控制寄存器窗口大小。
+    parameter int CSR_BLOCK_ID_W = 4; // CSR fabric 内部 block id 位宽。
+
     parameter int SRIOV_MAX_PF = 1; // 原型阶段只建模一个 PF。
     parameter int SRIOV_MAX_VF = 8; // 原型阶段最多建模 8 个 VF。
     parameter int SRIOV_FUNCTION_COUNT = SRIOV_MAX_PF + SRIOV_MAX_VF; // PF 与 VF 的 function 总数。
@@ -1201,6 +1217,23 @@ package smartnic_pkg;
         PCIE_BAR_RSP_MISALIGNED      = 3'd3, // 当前阶段不支持非 dword 对齐访问。
         PCIE_BAR_RSP_TARGET_ERROR    = 3'd4  // 下游目标报告错误，后续阶段使用。
     } pcie_bar_rsp_status_e;
+
+    typedef enum logic [CSR_BLOCK_ID_W-1:0] {
+        CSR_BLOCK_NONE       = 4'd0, // 未命中任何 CSR 子窗口。
+        CSR_BLOCK_QP         = 4'd1, // QP manager 寄存器窗口。
+        CSR_BLOCK_CQ         = 4'd2, // CQ manager 寄存器窗口。
+        CSR_BLOCK_MR         = 4'd3, // MR/MW manager 寄存器窗口。
+        CSR_BLOCK_AH         = 4'd4, // UD Address Handle table 寄存器窗口。
+        CSR_BLOCK_MSIX       = 4'd5, // MSI-X 控制寄存器窗口。
+        CSR_BLOCK_SRIOV      = 4'd6, // SR-IOV PF/VF 控制寄存器窗口。
+        CSR_BLOCK_CONGESTION = 4'd7  // ECN/CNP/DCQCN/PFC 拥塞控制寄存器窗口。
+    } csr_block_id_e;
+
+    typedef enum logic [2:0] {
+        CSR_DECODE_OK         = 3'd0, // CSR offset 命中合法子窗口。
+        CSR_DECODE_BAD_OFFSET = 3'd1, // CSR offset 未命中任何子窗口。
+        CSR_DECODE_MISALIGNED = 3'd2  // CSR offset 不是 32-bit 对齐。
+    } csr_decode_status_e;
 
     typedef enum logic [3:0] {
         SRIOV_ACCESS_BAR0_DOORBELL = 4'd0, // 检查 BAR0 Doorbell aperture 访问。

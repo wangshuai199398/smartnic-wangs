@@ -9,7 +9,7 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-congestion-integration test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker test-cnp-packet-generator test-cnp-receive-classifier test-dcqcn-state-machine test-tx-pacer-token-bucket test-pfc-pause-scheduler clean
+.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests top-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-congestion-integration test-smartnic-top-structure test-csr-fabric-structure test-doorbell-ctrl-structure test-rc-pipeline-structure test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker test-cnp-packet-generator test-cnp-receive-classifier test-dcqcn-state-machine test-tx-pacer-token-bucket test-pfc-pause-scheduler clean
 
 pcie-control-plane-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -145,6 +145,12 @@ congestion-tests:
 		$(MAKE) test-tx-pacer-token-bucket; \
 		$(MAKE) test-pfc-pause-scheduler; \
 	fi
+
+top-tests:
+	@$(MAKE) test-smartnic-top-structure
+	@$(MAKE) test-csr-fabric-structure
+	@$(MAKE) test-doorbell-ctrl-structure
+	@$(MAKE) test-rc-pipeline-structure
 
 test-pcie-cfg:
 	$(MAKE) TOPLEVEL=pcie_cfg_space MODULE=test_pcie_cfg_space \
@@ -390,6 +396,22 @@ test-congestion-stage10:
 test-congestion-integration:
 	@echo "[congestion-stage10] Running congestion integration mock tests..."
 	python3 test_congestion_integration.py
+
+test-smartnic-top-structure:
+	@echo "[smartnic-top] Running structural integration checks..."
+	python3 test_smartnic_top_structure.py
+
+test-csr-fabric-structure:
+	@echo "[csr-fabric] Running BAR2 CSR fabric structural checks..."
+	python3 test_csr_fabric_structure.py
+
+test-doorbell-ctrl-structure:
+	@echo "[doorbell-ctrl] Running top-level Doorbell control checks..."
+	python3 test_doorbell_ctrl_structure.py
+
+test-rc-pipeline-structure:
+	@echo "[rc-pipeline] Running minimal RC Send/Recv pipeline checks..."
+	python3 test_rc_pipeline_structure.py
 
 test-ah-table:
 	$(MAKE) TOPLEVEL=ah_table MODULE=test_ah_table \

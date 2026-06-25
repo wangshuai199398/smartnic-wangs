@@ -68,6 +68,10 @@
 | `test_dcqcn_state_machine.py` | `rtl/congestion/dcqcn_state_machine.sv` | per-QP rate config、CNP 后 current_rate 减半、min_rate clamp、alpha EWMA、recovery additive increase |
 | `test_tx_pacer_token_bucket.py` | `rtl/congestion/tx_pacer_token_bucket.sv` | per-QP bucket config、DCQCN rate update、token refill/clamp、allow/throttle/bypass/invalid decision |
 | `test_pfc_pause_scheduler.py` | `rtl/congestion/pfc_pause_scheduler.sv` | per-priority PAUSE/RESUME、timer expiry、TX scheduler backpressure、token bucket freeze gate |
+| `test_smartnic_top_structure.py` | `rtl/top/smartnic_top.sv` | 主要子系统实例、reset 同步、debug observability、顶层边界注释 |
+| `test_csr_fabric_structure.py` | `rtl/reg/csr_decode.sv` / `rtl/reg/csr_fabric.sv` / `rtl/top/smartnic_top.sv` | BAR2 CSR 子窗口、单 slave 选择、byte enable 写模型、top-level CSR fabric 连接 |
+| `test_doorbell_ctrl_structure.py` | `rtl/doorbell/doorbell_ctrl.sv` / `rtl/top/smartnic_top.sv` | BAR0 Doorbell 到 SQ/RQ PI 更新、CQ arm 和 scheduler wakeup hint 的 top-level 连接 |
+| `test_rc_pipeline_structure.py` | `rtl/top/rc_pipeline_top.sv` / `rtl/top/smartnic_top.sv` | 最小 RC Send/Recv pipeline、packet builder mux、completion engine 连接、CQE write hook |
 
 ## 运行方式
 
@@ -83,6 +87,7 @@ make dma-test
 make packet-test
 make transport-test
 make congestion-test
+make top-test
 ```
 
 或直接进入本目录运行：
@@ -97,6 +102,7 @@ make -C sim/cocotb dma-tests
 make -C sim/cocotb packet-tests
 make -C sim/cocotb transport-tests
 make -C sim/cocotb congestion-tests
+make -C sim/cocotb top-tests
 ```
 
 如果本机没有安装 `cocotb` 或 `verilator`，目标会打印提示并跳过。安装工具后，可以单独运行某个模块测试：
@@ -157,6 +163,7 @@ make -C sim/cocotb test-cnp-receive-classifier
 make -C sim/cocotb test-dcqcn-state-machine
 make -C sim/cocotb test-tx-pacer-token-bucket
 make -C sim/cocotb test-pfc-pause-scheduler
+make -C sim/cocotb test-smartnic-top-structure
 ```
 
 ## 当前限制
@@ -194,6 +201,7 @@ make -C sim/cocotb test-pfc-pause-scheduler
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
 - ECN/CNP/DCQCN/pacing/PFC congestion 测试只验证 10.1/10.2/10.3/10.4/10.5/10.6 的 CE mark propagation、CNP build request、CNP receive classification、per-QP rate update、token bucket allow/throttle 判定、PFC priority gate、malformed CNP drop 和轻量 counter，不发送真实 MAC/PFC control frame、不实现完整 TX scheduler，也不映射 CSR counter。
+- smartnic_top / CSR fabric / Doorbell control / RC pipeline 结构测试只检查 11.1/11.2/11.3/11.4 的层次实例、边界命名、BAR2 CSR decode/fabric、BAR0 Doorbell 到 QP/CQ manager 的控制连接、最小 RC Send/Recv hook、packet builder mux 和 completion event 连接；真实 PCIe/DMA/MR/transport/CQ notification 端到端行为测试留给 11.7。
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
 - RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。
