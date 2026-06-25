@@ -70,9 +70,10 @@ def test_smartnic_top_integrates_rc_pipeline():
     assert "rc_send_test_valid" in text
     assert "rc_recv_test_valid" in text
     assert "rc_build_valid" in text
-    assert "tx_build_req = cnp_build_valid ? cnp_build_req : rc_build_req" in text
-    assert ".event_valid(rc_completion_valid)" in text
-    assert ".event_type(rc_completion_event.event_type)" in text
+    assert "tx_build_req = cnp_build_valid ? cnp_build_req :" in text
+    assert "rc_build_valid ? rc_build_req : rdma_build_req" in text
+    assert ".event_valid(top_completion_valid)" in text
+    assert ".event_type(top_completion_event.event_type)" in text
     assert "cmpl_cqe_write_valid" in text
 
 

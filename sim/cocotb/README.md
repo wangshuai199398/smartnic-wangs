@@ -72,6 +72,7 @@
 | `test_csr_fabric_structure.py` | `rtl/reg/csr_decode.sv` / `rtl/reg/csr_fabric.sv` / `rtl/top/smartnic_top.sv` | BAR2 CSR 子窗口、单 slave 选择、byte enable 写模型、top-level CSR fabric 连接 |
 | `test_doorbell_ctrl_structure.py` | `rtl/doorbell/doorbell_ctrl.sv` / `rtl/top/smartnic_top.sv` | BAR0 Doorbell 到 SQ/RQ PI 更新、CQ arm 和 scheduler wakeup hint 的 top-level 连接 |
 | `test_rc_pipeline_structure.py` | `rtl/top/rc_pipeline_top.sv` / `rtl/top/smartnic_top.sv` | 最小 RC Send/Recv pipeline、packet builder mux、completion engine 连接、CQE write hook |
+| `test_rdma_write_read_engine_structure.py` | `rtl/transport/rdma_write_read_engine.sv` / `rtl/top/smartnic_top.sv` | 11.5 RDMA Write/Read one-sided pipeline、RETH packet build、single outstanding RDMA Read、completion mux |
 
 ## 运行方式
 

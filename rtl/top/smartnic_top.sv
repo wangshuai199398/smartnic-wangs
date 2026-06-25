@@ -67,6 +67,30 @@ module smartnic_top
     input  logic [DMA_LEN_W-1:0]         rc_recv_test_len,
     input  logic [511:0]                 rc_recv_test_payload,
 
+    // 11.5 RDMA Write/Read one-sided pipeline 测试入口；真实 SQ WQE fetch 留给后续任务。
+    input  logic                         rdma_wr_test_valid,
+    output logic                         rdma_wr_test_ready,
+    input  rdma_opcode_e                 rdma_wr_test_opcode,
+    input  logic [15:0]                  rdma_wr_test_desc_id,
+    input  logic [QP_ID_W-1:0]           rdma_wr_test_qpn,
+    input  logic [CQ_ID_W-1:0]           rdma_wr_test_cqn,
+    input  logic [VF_ID_W-1:0]           rdma_wr_test_owner_function,
+    input  logic [PD_ID_W-1:0]           rdma_wr_test_pd_id,
+    input  logic [WR_ID_W-1:0]           rdma_wr_test_wr_id,
+    input  logic [ADDR_W-1:0]            rdma_wr_test_local_va,
+    input  logic [KEY_W-1:0]             rdma_wr_test_lkey,
+    input  logic [ADDR_W-1:0]            rdma_wr_test_remote_va,
+    input  logic [KEY_W-1:0]             rdma_wr_test_rkey,
+    input  logic [DMA_LEN_W-1:0]         rdma_wr_test_len,
+    input  logic [511:0]                 rdma_wr_test_payload,
+    input  logic                         rdma_read_resp_test_valid,
+    output logic                         rdma_read_resp_test_ready,
+    input  logic [QP_ID_W-1:0]           rdma_read_resp_test_qpn,
+    input  logic [PSN_W-1:0]             rdma_read_resp_test_psn,
+    input  logic [DMA_LEN_W-1:0]         rdma_read_resp_test_len,
+    input  logic [511:0]                 rdma_read_resp_test_payload,
+    input  logic                         rdma_read_resp_test_error,
+
     // 简化 Ethernet/RoCEv2 frame 流接口。
     input  logic                         eth_rx_valid,
     output logic                         eth_rx_ready,
@@ -488,6 +512,25 @@ module smartnic_top
     cmpl_status_e rc_cq_commit_status;
     logic [PSN_W-1:0] rc_debug_next_psn;
     logic [3:0] rc_debug_state;
+    logic rdma_dma_read_valid;
+    logic [15:0] rdma_dma_read_desc_id;
+    logic [QP_ID_W-1:0] rdma_dma_read_qpn;
+    logic [ADDR_W-1:0] rdma_dma_read_local_va;
+    logic [KEY_W-1:0] rdma_dma_read_lkey;
+    logic [DMA_LEN_W-1:0] rdma_dma_read_len;
+    logic rdma_dma_write_valid;
+    logic [15:0] rdma_dma_write_desc_id;
+    logic [QP_ID_W-1:0] rdma_dma_write_qpn;
+    logic [ADDR_W-1:0] rdma_dma_write_local_va;
+    logic [KEY_W-1:0] rdma_dma_write_lkey;
+    logic [DMA_LEN_W-1:0] rdma_dma_write_len;
+    logic rdma_completion_valid;
+    logic rdma_completion_ready;
+    completion_event_t rdma_completion_event;
+    logic rdma_outstanding_read_valid;
+    logic [PSN_W-1:0] rdma_debug_next_psn;
+    logic [3:0] rdma_debug_state;
+    cmpl_status_e rdma_debug_status;
 
     rc_pipeline_top u_rc_pipeline_top (
         .clk(clk),
@@ -536,6 +579,63 @@ module smartnic_top
         .debug_state(rc_debug_state)
     );
 
+    rdma_write_read_engine #(
+        .LOCAL_MAC(LOCAL_MAC),
+        .PEER_MAC(PEER_MAC),
+        .LOCAL_IPV4(LOCAL_IPV4),
+        .PEER_IPV4(PEER_IPV4)
+    ) u_rdma_write_read_engine (
+        .clk(clk),
+        .rst_n(core_rst_n),
+        .wr_valid(rdma_wr_test_valid),
+        .wr_ready(rdma_wr_test_ready),
+        .wr_opcode(rdma_wr_test_opcode),
+        .wr_desc_id(rdma_wr_test_desc_id),
+        .wr_qpn(rdma_wr_test_qpn),
+        .wr_cqn(rdma_wr_test_cqn),
+        .wr_owner_function(rdma_wr_test_owner_function),
+        .wr_pd_id(rdma_wr_test_pd_id),
+        .wr_id(rdma_wr_test_wr_id),
+        .wr_local_va(rdma_wr_test_local_va),
+        .wr_lkey(rdma_wr_test_lkey),
+        .wr_remote_va(rdma_wr_test_remote_va),
+        .wr_rkey(rdma_wr_test_rkey),
+        .wr_len(rdma_wr_test_len),
+        .wr_payload_data(rdma_wr_test_payload),
+        .wr_solicited(1'b0),
+        .read_resp_valid(rdma_read_resp_test_valid),
+        .read_resp_ready(rdma_read_resp_test_ready),
+        .read_resp_qpn(rdma_read_resp_test_qpn),
+        .read_resp_psn(rdma_read_resp_test_psn),
+        .read_resp_len(rdma_read_resp_test_len),
+        .read_resp_payload_data(rdma_read_resp_test_payload),
+        .read_resp_error(rdma_read_resp_test_error),
+        .packet_build_valid(rdma_build_valid),
+        .packet_build_ready(rdma_build_ready),
+        .packet_build_req(rdma_build_req),
+        .dma_read_valid(rdma_dma_read_valid),
+        .dma_read_ready(1'b1),
+        .dma_read_desc_id(rdma_dma_read_desc_id),
+        .dma_read_qpn(rdma_dma_read_qpn),
+        .dma_read_local_va(rdma_dma_read_local_va),
+        .dma_read_lkey(rdma_dma_read_lkey),
+        .dma_read_len(rdma_dma_read_len),
+        .dma_write_valid(rdma_dma_write_valid),
+        .dma_write_ready(1'b1),
+        .dma_write_desc_id(rdma_dma_write_desc_id),
+        .dma_write_qpn(rdma_dma_write_qpn),
+        .dma_write_local_va(rdma_dma_write_local_va),
+        .dma_write_lkey(rdma_dma_write_lkey),
+        .dma_write_len(rdma_dma_write_len),
+        .completion_event_valid(rdma_completion_valid),
+        .completion_event_ready(rdma_completion_ready),
+        .completion_event(rdma_completion_event),
+        .outstanding_read_valid(rdma_outstanding_read_valid),
+        .debug_next_psn(rdma_debug_next_psn),
+        .debug_state(rdma_debug_state),
+        .debug_status(rdma_debug_status)
+    );
+
     // ------------------------------------------------------------------
     // Packet ingress, ECN/CNP, and packet builder boundary
     // ------------------------------------------------------------------
@@ -560,6 +660,9 @@ module smartnic_top
     packet_build_req_t rc_build_req;
     logic rc_build_valid;
     logic rc_build_ready;
+    packet_build_req_t rdma_build_req;
+    logic rdma_build_valid;
+    logic rdma_build_ready;
     packet_build_req_t tx_build_req;
     logic tx_build_valid;
     logic tx_build_ready;
@@ -649,10 +752,12 @@ module smartnic_top
         .build_req(cnp_build_req)
     );
 
-    assign tx_build_valid = cnp_build_valid || rc_build_valid;
-    assign tx_build_req = cnp_build_valid ? cnp_build_req : rc_build_req;
+    assign tx_build_valid = cnp_build_valid || rc_build_valid || rdma_build_valid;
+    assign tx_build_req = cnp_build_valid ? cnp_build_req :
+                          (rc_build_valid ? rc_build_req : rdma_build_req);
     assign cnp_build_ready = tx_build_ready;
     assign rc_build_ready = !cnp_build_valid && tx_build_ready;
+    assign rdma_build_ready = !cnp_build_valid && !rc_build_valid && tx_build_ready;
 
     roce_packet_builder u_packet_builder (
         .clk(clk),
@@ -786,6 +891,9 @@ module smartnic_top
     logic cmpl_cqe_write_solicited;
     cmpl_status_e cmpl_cqe_write_status;
     logic cmpl_cqe_write_error;
+    logic top_completion_valid;
+    logic top_completion_ready;
+    completion_event_t top_completion_event;
 
     qp_context_table u_qp_table (
         .clk(clk),
@@ -881,24 +989,29 @@ module smartnic_top
         .overflow_clear_rsp_ready(1'b1)
     );
 
+    assign top_completion_valid = rc_completion_valid || rdma_completion_valid;
+    assign top_completion_event = rc_completion_valid ? rc_completion_event : rdma_completion_event;
+    assign rc_completion_ready = top_completion_ready;
+    assign rdma_completion_ready = !rc_completion_valid && top_completion_ready;
+
     completion_engine u_completion_engine (
         .clk(clk),
         .rst_n(core_rst_n),
-        .event_valid(rc_completion_valid),
-        .event_ready(rc_completion_ready),
-        .event_type(rc_completion_event.event_type),
-        .qpn(rc_completion_event.qpn),
-        .cqn(rc_completion_event.cqn),
-        .owner_function(rc_completion_event.owner_function),
-        .wr_id(rc_completion_event.wr_id),
-        .opcode(rc_completion_event.opcode),
-        .status(rc_completion_event.status),
-        .byte_len(rc_completion_event.byte_len),
-        .imm_data(rc_completion_event.imm_data),
-        .has_imm(rc_completion_event.has_imm),
-        .solicited(rc_completion_event.solicited),
-        .vendor_error(rc_completion_event.vendor_error),
-        .source_engine(rc_completion_event.source_engine),
+        .event_valid(top_completion_valid),
+        .event_ready(top_completion_ready),
+        .event_type(top_completion_event.event_type),
+        .qpn(top_completion_event.qpn),
+        .cqn(top_completion_event.cqn),
+        .owner_function(top_completion_event.owner_function),
+        .wr_id(top_completion_event.wr_id),
+        .opcode(top_completion_event.opcode),
+        .status(top_completion_event.status),
+        .byte_len(top_completion_event.byte_len),
+        .imm_data(top_completion_event.imm_data),
+        .has_imm(top_completion_event.has_imm),
+        .solicited(top_completion_event.solicited),
+        .vendor_error(top_completion_event.vendor_error),
+        .source_engine(top_completion_event.source_engine),
         .cq_lookup_valid(cq_lookup_valid),
         .cq_lookup_ready(cq_lookup_ready),
         .cq_lookup_cqn(cq_lookup_cqn),
@@ -1032,7 +1145,12 @@ module smartnic_top
 
     assign debug_qp_status = {31'd0, core_rst_n};
     assign debug_cq_status = {30'd0, cq_lookup_valid, cq_lookup_ready};
-    assign debug_transport_status = {rc_next_psn[22:0], rc_outstanding_count, rc_debug_status};
+    assign debug_transport_status = {rdma_outstanding_read_valid,
+                                     rdma_debug_status[6:0],
+                                     rdma_debug_state,
+                                     rc_outstanding_count,
+                                     rc_debug_status,
+                                     rc_next_psn[7:0]};
     assign debug_congestion_status = {pfc_pause_state, 8'd0, pacer_throttled_events[7:0], pfc_stall_events[7:0]};
 
 endmodule

@@ -130,9 +130,30 @@ RC Recv hook
 
 当前只支持单 active QP、单 packet per WR 和 RC Send 最小路径，不实现 retry/RNR/congestion/multi-QP arbitration。`rc_send_test_*` 和 `rc_recv_test_*` 是 11.4 的测试入口；真实 SQ WQE fetch、MR translation、host memory read/write、parser-driven RX 和 CQ notification 完整闭环留给 11.5-11.7。
 
+## 11.5 RDMA Write / Read 数据通路
+
+11.5 新增 `rtl/transport/rdma_write_read_engine.sv`，并在 `smartnic_top.sv` 暴露 `rdma_wr_test_*` 和 `rdma_read_resp_test_*` 测试入口：
+
+```text
+RDMA Write hook
+  -> rdma_write_read_engine
+  -> DMA read hook
+  -> packet builder(opcode=RDMA_WRITE_ONLY + RETH)
+  -> completion_engine
+
+RDMA Read hook
+  -> rdma_write_read_engine
+  -> packet builder(opcode=RDMA_READ_REQ + RETH)
+  -> single outstanding read context
+  -> response injection hook
+  -> DMA write hook
+  -> completion_engine
+```
+
+Packet builder 输入现在按 `CNP > RC Send/Recv > RDMA Write/Read` 的固定优先级选择。Completion event 输入按 `RC completion > RDMA completion` 选择。该阶段只做 one-sided datapath 的最小顶层贯通；真实 MR permission pipeline、PCIe DMA completion、多包 RDMA Read response 和 retry/ACK/NAK 留给后续集成。
+
 ## 后续任务边界
 
-- 11.5：连接 RDMA Write / RDMA Read 数据路径。
 - 11.6：连接 UD transmit / receive 数据路径。
 - 11.7：增加 reset、CSR、Doorbell-to-CQE、RC/UD、MSI-X top-level tests。
 
