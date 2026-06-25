@@ -60,11 +60,12 @@
 | `test_rc_immediate_engine.py` | `rtl/transport/rc_immediate_engine.sv` | SEND_WITH_IMM、RDMA_WRITE_WITH_IMM、0x11223344 byte order、RNR、remote write denial、normal SEND/WRITE no immediate CQE |
 | `test_ud_tx_engine.py` | `rtl/transport/ud_tx_engine.sv` | UD SEND、AH lookup、DETH Q_Key/source QPN、无 RC connection state、invalid AH、missing Q_Key、拒绝 UD RDMA ops |
 | `test_ud_rx_engine.py` | `rtl/transport/ud_rx_engine.sv` | UD receive DETH parsing、Q_Key validation、source QPN completion seed、missing RQ WQE、malformed/invalid DETH counters |
-| `test_congestion_stage10.py` | 第 10.1 阶段 ECN mock checks | IPv4 DS field、IPv6 traffic class、CE hook、malformed counter、非 ECN 透传 |
+| `test_congestion_stage10.py` | 第 10 阶段 congestion mock checks | IPv4/IPv6 ECN、CE hook、CNP、DCQCN rate update、token bucket pacing |
 | `test_ecn_ingress_marker.py` | `rtl/congestion/ecn_ingress_marker.sv` | CE mark hook、ECN/CE/malformed counter、非 CE 包透传 |
 | `test_cnp_packet_generator.py` | `rtl/congestion/cnp_packet_generator.sv` | CE/queue/port trigger 到 CNP build request、congestion type、per-QP rate limit |
 | `test_cnp_receive_classifier.py` | `rtl/congestion/cnp_receive_classifier.sv` | CNP opcode/UDP port 分类、QP lookup hit/miss、DCQCN event、invalid counter |
 | `test_dcqcn_state_machine.py` | `rtl/congestion/dcqcn_state_machine.sv` | per-QP rate config、CNP 后 current_rate 减半、min_rate clamp、alpha EWMA、recovery additive increase |
+| `test_tx_pacer_token_bucket.py` | `rtl/congestion/tx_pacer_token_bucket.sv` | per-QP bucket config、DCQCN rate update、token refill/clamp、allow/throttle/bypass/invalid decision |
 
 ## 运行方式
 
@@ -151,6 +152,7 @@ make -C sim/cocotb test-ecn-ingress-marker
 make -C sim/cocotb test-cnp-packet-generator
 make -C sim/cocotb test-cnp-receive-classifier
 make -C sim/cocotb test-dcqcn-state-machine
+make -C sim/cocotb test-tx-pacer-token-bucket
 ```
 
 ## 当前限制
@@ -187,7 +189,7 @@ make -C sim/cocotb test-dcqcn-state-machine
 - Packet builder 测试只验证 8.4 的单 beat header/payload frame 构造，不实现真实 ICRC、IPv4/UDP checksum、PMTU 多 beat packetization 或第 9 阶段 transport 语义。
 - ICRC placeholder 测试只验证 8.5 的隔离占位行为，不实现真实 RoCEv2 invariant CRC，因此不能代表真实网络互操作兼容性。
 - Stage 8 packet mock integration 测试只串联第 8 阶段的抽象语义，不实例化完整 RTL pipeline，不实现第 9 阶段 RC/UD transport，也不证明真实 RoCEv2 互操作。
-- ECN/CNP/DCQCN congestion 测试只验证 10.1/10.2/10.3 的 CE mark propagation、CNP build request、CNP receive classification、per-QP rate update 和轻量 counter，不实现 10.4 token bucket pacing、不发送真实 MAC packet、不映射 CSR counter。
+- ECN/CNP/DCQCN/pacing congestion 测试只验证 10.1/10.2/10.3/10.4 的 CE mark propagation、CNP build request、CNP receive classification、per-QP rate update、token bucket allow/throttle 判定和轻量 counter，不发送真实 MAC packet、不实现完整 TX scheduler，也不映射 CSR counter。
 - RC send engine 测试只验证 9.1 的 send-side PSN、outstanding、ACK、retry 和 retry exhausted QP error 请求，不实现 9.2 receive-side PSN validation、NAK/RNR、9.3 RDMA Read sequencing 或完整 RC retry 语义。
 - RC receive engine 测试只验证 9.2 的 receive-side PSN 顺序检查、duplicate/replay drop、gap NAK、ACK 合并和 RNR NAK，不实现 9.3 RDMA Read sequencing、完整 AETH syndrome/MSN 编码、RNR retry timer 或真实 RQ/DMA side effect。
 - RC RDMA Read engine 测试只验证 9.3 的 requester/responder/response receive 最小序列，不实现多 outstanding table、真实 MR/DMA pipeline、PMTU 多响应分段、完整 retry/NAK replay 或 RoCEv2 wire-format 互操作。

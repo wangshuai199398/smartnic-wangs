@@ -94,7 +94,7 @@
 - [x] 10.1 Implement ECN detection from ingress packets and pass congestion marks to transport and congestion logic.
 - [x] 10.2 Implement CNP packet generation and CNP receive classification.
 - [x] 10.3 Implement DCQCN state machine with configurable alpha, rate decrease, rate recovery, target rate, and minimum rate.
-- [ ] 10.4 Implement per-QP token bucket or equivalent transmit pacing.
+- [x] 10.4 Implement per-QP token bucket or equivalent transmit pacing.
 - [ ] 10.5 Implement PFC pause handling for configured priority and transmit scheduler backpressure.
 - [ ] 10.6 Add congestion tests for ECN-to-CNP, CNP rate update, rate recovery, pacing, PFC pause/resume, and malformed CNP handling.
 

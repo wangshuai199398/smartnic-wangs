@@ -1,6 +1,6 @@
 # Congestion Control
 
-本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，10.2 CNP packet generation / receive classification，以及 10.3 per-QP DCQCN state machine。不实现 10.4 transmit pacing，也不处理 PFC pause。
+本文件记录第 10 阶段拥塞控制路径。当前实现覆盖 10.1 ingress ECN detection、CE mark propagation，10.2 CNP packet generation / receive classification，10.3 per-QP DCQCN state machine，以及 10.4 per-QP token bucket transmit pacing。不处理 PFC pause。
 
 ## 10.1 ECN Ingress Detection
 
@@ -56,8 +56,7 @@ IPv6 当前只完成 traffic class/ECN detection。因为项目的 8.x parser/va
 ## 边界
 
 - CNP 生成只输出到 packet builder 请求，不直接驱动 MAC TX top。
-- DCQCN 只输出 per-QP `current_rate` update；真正 transmit pacing 由 10.4 负责。
-- 不实现 transmit pacing；10.4 负责。
+- DCQCN 只输出 per-QP `current_rate` update；10.4 token bucket 使用该 rate 做发送准入判定。
 - 不实现 PFC pause/resume；10.5 负责。
 - 不改变普通非 ECN 包的 parser、validator、payload extraction 或 transport 行为。
 
@@ -205,3 +204,58 @@ state        = NORMAL if current_rate == target_rate else RECOVERY
 | `rate_decrease` | multiplicative decrease 次数 |
 | `rate_increase` | additive increase 次数 |
 | `state_transitions` | NORMAL/CONGESTED/RECOVERY 状态变化次数 |
+
+## 10.4 Per-QP Token Bucket Pacing
+
+`rtl/congestion/tx_pacer_token_bucket.sv` 把 10.3 输出的 DCQCN `current_rate` 转换成每个 QP 的发送准入规则：
+
+```text
+dcqcn_state_machine.rate_update
+  -> tx_pacer_token_bucket(QP bucket rate)
+TX packet metadata(packet_size, qpn, owner_function)
+  -> token refill + token consume
+  -> ALLOWED / THROTTLED / DISABLED / INVALID decision
+  -> transport TX scheduler hook
+```
+
+每个 QP bucket 保存：
+
+| 字段 | 含义 |
+| --- | --- |
+| `rate` | 来自 DCQCN 的 `current_rate`，当前按每个 time tick 增加的 token 数建模 |
+| `bucket_size` | 最大 burst 容量 |
+| `tokens` | 当前可用 token |
+| `last_update_time` | 上次 refill 使用的时间戳 |
+| `qpn` / `owner_function` | 防止不同 QP/VF 共享同一个 bucket entry |
+
+Refill 规则：
+
+```text
+delta_time = time_now - last_update_time
+tokens     = min(tokens + rate * delta_time, bucket_size)
+```
+
+发送规则：
+
+| 情况 | 行为 |
+| --- | --- |
+| `tokens >= packet_size` | 输出 `PACER_STATUS_ALLOWED`，扣减 `packet_size` 个 token |
+| `tokens < packet_size` | 输出 `PACER_STATUS_THROTTLED`，TX path 应暂停该 QP 发包 |
+| `pacer_enable=0` | 输出 `PACER_STATUS_DISABLED`，旁路允许发送 |
+| bucket 未配置、owner 不匹配、packet_size 为 0 | 输出 `PACER_STATUS_INVALID` |
+
+10.4 只做准入判定，不直接操作 packet builder、MAC TX 或 QP scheduler。真实 TX scheduler 应把待发送 packet 的 `packet_size`、`qpn`、`owner_function` 送入 pacer；只有返回 `ALLOWED` 时继续发包。若返回 `THROTTLED`，scheduler 可以稍后重试同一个 QP。
+
+Debug counters：
+
+| Counter | 含义 |
+| --- | --- |
+| `tokens_refilled` | 成功 refill 到 bucket 中的 token 累计数 |
+| `tx_throttled_events` | token 不足导致 TX 暂停的次数 |
+| `tx_allowed_packets` | 被允许或 bypass 的 packet 数 |
+
+当前限制：
+
+- `rate` 单位是原型抽象 token/tick，尚未映射到真实 Gbps、端口时钟或 packet scheduler credit。
+- bucket 表按 QPN 低位索引，未实现 collision walk；后续资源管理/CSR 阶段可以替换为更完整的 per-QP table。
+- `THROTTLED` 只输出判定，不实现真实 TX 队列暂停/恢复，这部分属于后续 transmit scheduler/top 集成。

@@ -1849,6 +1849,37 @@ package smartnic_pkg;
         dcqcn_state_e             state;          // NORMAL/CONGESTED/RECOVERY。
     } dcqcn_rate_update_t;
 
+    parameter int PACER_TOKEN_W = 64; // token bucket token/容量位宽。
+    parameter int PACER_TIME_W = 32;  // pacing 时间戳/周期计数位宽。
+    parameter int PACER_PACKET_LEN_W = 16; // TX packet size 位宽。
+    parameter int PACER_COUNTER_W = 32; // pacing debug counter 位宽。
+
+    typedef enum logic [1:0] {
+        PACER_STATUS_ALLOWED   = 2'd0, // token 足够，允许发送。
+        PACER_STATUS_THROTTLED = 2'd1, // token 不足，阻塞/暂停该 QP 发送。
+        PACER_STATUS_DISABLED  = 2'd2, // pacer 未使能，旁路允许。
+        PACER_STATUS_INVALID   = 2'd3  // QP/bucket 未配置或请求无效。
+    } pacer_status_e;
+
+    typedef struct packed {
+        logic [15:0]              desc_id;        // TX 请求来源 descriptor ID。
+        logic [QP_ID_W-1:0]       qpn;            // 待发送 packet 所属 QP。
+        logic [VF_ID_W-1:0]       owner_function; // 所属 PF/VF function。
+        logic [PD_ID_W-1:0]       pd_id;          // Protection Domain。
+        roce_opcode_e             opcode;         // packet/WR opcode。
+        logic [PACER_PACKET_LEN_W-1:0] packet_size; // 本次发送需要消耗的 token 数。
+    } pacer_tx_req_t;
+
+    typedef struct packed {
+        logic [15:0]              desc_id;        // 与请求对应。
+        logic [QP_ID_W-1:0]       qpn;            // QP。
+        logic [VF_ID_W-1:0]       owner_function; // 所属 function。
+        logic [PD_ID_W-1:0]       pd_id;          // Protection Domain。
+        roce_opcode_e             opcode;         // opcode。
+        logic [PACER_TOKEN_W-1:0] tokens_after;   // 判定后的 token 数。
+        pacer_status_e            status;         // allow/throttle/invalid。
+    } pacer_decision_t;
+
     parameter int RC_SEND_OUTSTANDING_DEPTH = 4; // 9.1 最小 RC send outstanding window 深度。
     parameter int RC_SEND_RETRY_TIMER_W = 16; // retry timer 计数位宽。
     parameter int RC_SEND_RETRY_COUNT_W = 8; // retry count 位宽。

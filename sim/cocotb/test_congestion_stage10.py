@@ -8,6 +8,10 @@ ROCEV2_UDP_PORT = 4791
 DCQCN_STATE_NORMAL = "NORMAL"
 DCQCN_STATE_CONGESTED = "CONGESTED"
 DCQCN_STATE_RECOVERY = "RECOVERY"
+PACER_STATUS_ALLOWED = "ALLOWED"
+PACER_STATUS_THROTTLED = "THROTTLED"
+PACER_STATUS_DISABLED = "DISABLED"
+PACER_STATUS_INVALID = "INVALID"
 
 
 def parse_ipv4_ecn(dsfield):
@@ -225,6 +229,86 @@ def test_dcqcn_recovery_additive_increase_to_normal():
     assert dcqcn.rate_increase == 2
 
 
+class TokenBucketPacerModel:
+    def __init__(self):
+        self.enabled = True
+        self.buckets = {}
+        self.tokens_refilled = 0
+        self.tx_throttled_events = 0
+        self.tx_allowed_packets = 0
+
+    def configure(self, qpn, owner_function, bucket_size, initial_tokens, now):
+        self.buckets[(qpn, owner_function)] = {
+            "rate": 0,
+            "bucket_size": bucket_size,
+            "tokens": min(initial_tokens, bucket_size),
+            "last_update_time": now,
+        }
+
+    def update_rate(self, qpn, owner_function, current_rate):
+        bucket = self.buckets.setdefault((qpn, owner_function), {
+            "rate": 0,
+            "bucket_size": 0,
+            "tokens": 0,
+            "last_update_time": 0,
+        })
+        bucket["rate"] = current_rate
+
+    def pace(self, qpn, owner_function, packet_size, now):
+        if not self.enabled:
+            self.tx_allowed_packets += 1
+            return PACER_STATUS_DISABLED, 0
+        bucket = self.buckets.get((qpn, owner_function))
+        if bucket is None or bucket["bucket_size"] == 0 or packet_size == 0:
+            return PACER_STATUS_INVALID, 0
+        delta = now - bucket["last_update_time"]
+        refill = bucket["rate"] * delta
+        before = bucket["tokens"]
+        bucket["tokens"] = min(bucket["tokens"] + refill, bucket["bucket_size"])
+        self.tokens_refilled += max(bucket["tokens"] - before, 0)
+        bucket["last_update_time"] = now
+        if bucket["tokens"] < packet_size:
+            self.tx_throttled_events += 1
+            return PACER_STATUS_THROTTLED, bucket["tokens"]
+        bucket["tokens"] -= packet_size
+        self.tx_allowed_packets += 1
+        return PACER_STATUS_ALLOWED, bucket["tokens"]
+
+
+def test_pacer_refills_tokens_from_dcqcn_rate_and_allows_packet():
+    pacer = TokenBucketPacerModel()
+    pacer.configure(qpn=0x10, owner_function=1, bucket_size=1000, initial_tokens=0, now=0)
+    pacer.update_rate(qpn=0x10, owner_function=1, current_rate=100)
+
+    status, tokens_after = pacer.pace(qpn=0x10, owner_function=1, packet_size=150, now=2)
+    assert status == PACER_STATUS_ALLOWED
+    assert tokens_after == 50
+    assert pacer.tokens_refilled == 200
+    assert pacer.tx_allowed_packets == 1
+
+
+def test_pacer_throttles_when_packet_exceeds_tokens():
+    pacer = TokenBucketPacerModel()
+    pacer.configure(qpn=0x10, owner_function=1, bucket_size=1000, initial_tokens=10, now=0)
+    pacer.update_rate(qpn=0x10, owner_function=1, current_rate=0)
+
+    status, tokens_after = pacer.pace(qpn=0x10, owner_function=1, packet_size=100, now=1)
+    assert status == PACER_STATUS_THROTTLED
+    assert tokens_after == 10
+    assert pacer.tx_throttled_events == 1
+
+
+def test_pacer_refill_clamps_to_bucket_size():
+    pacer = TokenBucketPacerModel()
+    pacer.configure(qpn=0x10, owner_function=1, bucket_size=1000, initial_tokens=900, now=0)
+    pacer.update_rate(qpn=0x10, owner_function=1, current_rate=100)
+
+    status, tokens_after = pacer.pace(qpn=0x10, owner_function=1, packet_size=100, now=5)
+    assert status == PACER_STATUS_ALLOWED
+    assert tokens_after == 900
+    assert pacer.tokens_refilled == 100
+
+
 def main():
     test_ipv4_ce_detection()
     test_ipv6_traffic_class_ce_detection()
@@ -238,7 +322,10 @@ def main():
     test_dcqcn_cnp_halves_rate_and_updates_alpha()
     test_dcqcn_decrease_clamps_to_min_rate()
     test_dcqcn_recovery_additive_increase_to_normal()
-    print("[stage10] ECN/CNP congestion semantic checks passed")
+    test_pacer_refills_tokens_from_dcqcn_rate_and_allows_packet()
+    test_pacer_throttles_when_packet_exceeds_tokens()
+    test_pacer_refill_clamps_to_bucket_size()
+    print("[stage10] ECN/CNP/DCQCN/pacing semantic checks passed")
 
 
 if __name__ == "__main__":
