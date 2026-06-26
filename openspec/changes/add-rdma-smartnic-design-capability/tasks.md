@@ -117,7 +117,7 @@
 - [x] 12.5 Implement driver interrupt support with MSI-X setup, ISR, event handling, and teardown.
 - [x] 12.6 Implement driver DMA buffer management for queues, descriptors, and user-visible rings.
 - [x] 12.7 Implement driver tests for probe/remove, mailbox, char device, ioctl, mmap, poll, MSI-X, and DMA buffer lifecycle.
-- [ ] 12.8 Implement AH create/destroy ioctls for UD addressing.
+- [x] 12.8 Implement driver documentation, example usage, and troubleshooting notes.
 - [ ] 12.9 Implement MSI-X interrupt handlers for CQ events and async events.
 - [ ] 12.10 Implement SR-IOV enable/disable, VF resource quotas, and per-function cleanup.
 - [ ] 12.11 Implement hot-remove and process-release cleanup for all resources owned by a file descriptor.

@@ -12,7 +12,7 @@ LIB_OBJS := libsmartnic.o
 BIN := smartnicctl
 LIB := libsmartnic.a
 
-.PHONY: all clean test install
+.PHONY: all clean test examples install
 
 all: $(LIB) $(BIN)
 
@@ -28,6 +28,9 @@ $(BIN): smartnicctl.o $(LIB)
 test: all
 	@./smartnicctl --help >/dev/null
 	@python3 tests/test_smartnicctl.py
+
+examples:
+	@$(MAKE) -C ../examples
 
 install: all
 	@echo "install target is intentionally left to packaging in this prototype"
