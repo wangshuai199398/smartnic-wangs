@@ -85,6 +85,9 @@
 
 `poll()` 报告：
 
+常见组合为 `POLLIN | POLLRDNORM`、`POLLOUT | POLLWRNORM` 和
+`POLLERR | POLLHUP`。
+
 | 掩码 | 含义 |
 | --- | --- |
 | `POLLIN \| POLLRDNORM` | 事件/mailbox/CQ 通知就绪 |

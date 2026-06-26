@@ -3,4 +3,4 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-exec "$ROOT/tests/smartnic_driver_test.sh"
+exec "$ROOT/tests/run_driver_integration.sh"

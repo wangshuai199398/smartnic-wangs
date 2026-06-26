@@ -35,12 +35,12 @@ def main() -> None:
         require(combined_docs, needle, f"doc reference {needle}")
 
     for needle in [
-        "PCIe Probe And Remove",
-        "BAR And CSR Mapping",
+        "PCIe Probe 与 Remove",
+        "BAR 与 CSR 映射",
         "CSR Mailbox",
-        "Character Device",
-        "DMA Ring Lifecycle",
-        "MSI-X Interrupt Handling",
+        "字符设备",
+        "DMA Ring 生命周期",
+        "MSI-X 中断处理",
     ]:
         require(driver, needle, f"driver overview {needle}")
 
@@ -54,12 +54,12 @@ def main() -> None:
         require(uapi, needle, f"UAPI reference {needle}")
 
     for needle in [
-        "Probe Fails",
-        "BAR Mapping Fails",
-        "DMA Mask Setup Fails",
-        "Mailbox Timeout",
-        "MSI-X Allocation Fails",
-        "Device Removed While In Use",
+        "Probe 失败",
+        "BAR 映射失败",
+        "DMA 掩码设置失败",
+        "Mailbox 超时",
+        "MSI-X 分配失败",
+        "使用中设备被移除",
     ]:
         require(troubleshooting, needle, f"troubleshooting {needle}")
 

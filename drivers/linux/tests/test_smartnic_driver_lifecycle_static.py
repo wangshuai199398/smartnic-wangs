@@ -147,7 +147,7 @@ def main() -> None:
             "driver lifecycle static test target")
     require(shell_test, "No /dev/smartnic device present; hardware smoke tests skipped",
             "hardware skip message")
-    require(selftest, "smartnic_driver_test.sh", "selftest delegates to project test")
+    require(selftest, "run_driver_integration.sh", "selftest delegates to integration test")
     require(tasks, "- [x] 12.7 Implement driver tests", "12.7 task completion")
 
     print("smartnic driver lifecycle static tests passed")
