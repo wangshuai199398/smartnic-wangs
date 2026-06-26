@@ -48,11 +48,14 @@ extern "C" {
 #define SMARTNIC_CMD_DESTROY_QP   0x0304
 #define SMARTNIC_CMD_REG_MR       0x0401
 #define SMARTNIC_CMD_DEREG_MR     0x0402
+#define SMARTNIC_CMD_CREATE_AH    0x0501
+#define SMARTNIC_CMD_DESTROY_AH   0x0502
 
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_PD 0x534e5044U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ 0x534e4345U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_QP 0x534e5150U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_MR 0x534e4d52U
+#define SMARTNIC_PROVIDER_OBJECT_MAGIC_AH 0x534e4148U
 
 #define SMARTNIC_PROVIDER_WC_FLAG_IMM 0x00000001U
 
@@ -207,6 +210,22 @@ struct smartnic_provider_qp_attr {
 	uint8_t timeout;
 };
 
+struct smartnic_provider_ah_attr {
+	uint8_t port_num;
+	uint8_t is_global;
+	uint32_t gid_index;
+	struct smartnic_provider_gid dgid;
+	uint16_t dlid;
+	uint8_t sl;
+	uint8_t traffic_class;
+	uint32_t flow_label;
+	uint8_t hop_limit;
+	uint8_t static_rate;
+	uint8_t src_path_bits;
+	uint32_t qkey;
+	uint32_t dest_qpn;
+};
+
 struct smartnic_provider_device {
 	char name[SMARTNIC_PROVIDER_MAX_NAME];
 	char node_path[SMARTNIC_PROVIDER_MAX_PATH];
@@ -236,6 +255,7 @@ struct smartnic_provider_context {
 	struct smartnic_provider_cq *cq_list;
 	struct smartnic_provider_qp *qp_list;
 	struct smartnic_provider_mr *mr_list;
+	struct smartnic_provider_ah *ah_list;
 	int closed;
 };
 
@@ -310,6 +330,17 @@ struct smartnic_provider_mr {
 	struct smartnic_provider_mr *next;
 };
 
+struct smartnic_provider_ah {
+	uint32_t magic;
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_pd *pd;
+	uint32_t kernel_handle;
+	struct smartnic_provider_ah_attr attr;
+	unsigned int active_ops;
+	unsigned int refcount;
+	struct smartnic_provider_ah *next;
+};
+
 int smartnic_provider_discover(struct smartnic_provider_device **devices,
 			       size_t *count);
 void smartnic_provider_free_devices(struct smartnic_provider_device *devices);
@@ -360,6 +391,11 @@ int smartnic_provider_reg_mr(struct smartnic_provider_pd *pd, void *addr,
 			     uint64_t length, uint32_t access_flags,
 			     struct smartnic_provider_mr **mr);
 int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr);
+
+int smartnic_provider_create_ah(struct smartnic_provider_pd *pd,
+				const struct smartnic_provider_ah_attr *attr,
+				struct smartnic_provider_ah **ah);
+int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
 
 const char *smartnic_provider_strerror(int err);
 

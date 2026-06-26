@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。
 
 ## 已实现的 API
 
@@ -49,6 +49,10 @@ int smartnic_provider_reg_mr(struct smartnic_provider_pd *pd, void *addr,
                              uint64_t length, uint32_t access_flags,
                              struct smartnic_provider_mr **mr);
 int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr);
+int smartnic_provider_create_ah(struct smartnic_provider_pd *pd,
+                                const struct smartnic_provider_ah_attr *attr,
+                                struct smartnic_provider_ah **ah);
+int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
 ```
 
 ## 设备发现
@@ -199,10 +203,27 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 
 `smartnic_provider_dereg_mr()` 会验证 MR magic、parent context 和链表归属，拒绝仍有 active operations 或额外 refcount 的 MR。注销成功后发送 `SMARTNIC_CMD_DEREG_MR`，释放 PD child/refcount，并从 context MR 链表摘除。重复注销或伪造 MR 会返回 `EINVAL`。
 
-## 13.6 后仍未实现的内容
+## AH 生命周期
+
+`smartnic_provider_create_ah()` 用于 UD QP 后续发送时引用目的地址。当前仅支持 RoCE/Ethernet 风格的 global addressing，因此 `is_global` 必须为 1。创建前会校验：
+
+- parent PD 有效且属于当前 context；
+- `port_num` 在 provider 支持范围内；
+- 端口 link layer 为 Ethernet/RoCE；
+- `gid_index` 能通过 `query_gid` 兼容逻辑；
+- `sl <= 15`；
+- `flow_label <= 0xfffff`；
+- `hop_limit != 0`；
+- LID-only 或非 RoCE addressing 返回 `EOPNOTSUPP`。
+
+AH 对象保存 parent context、PD、kernel AH handle、port、GID index、DGID、SL、traffic class、flow label、hop limit、static rate、path bits、Q_Key 和 destination QPN。这些字段为 13.8/13.9 的 UD Send WQE builder 和 post_send 复用。
+
+`smartnic_provider_destroy_ah()` 会拒绝仍有 active UD operations 或额外 refcount 的 AH，成功后发送 `SMARTNIC_CMD_DESTROY_AH`，释放 PD child/refcount，并从 context AH 链表摘除。13.7 不实现 multicast、特殊地址模式，也不构造真实 UD WQE。
+
+## 13.7 后仍未实现的内容
 
 - QP send/recv posting；
-- AH 管理；
+- WQE 构建；
 - 快速路径 Doorbell 写入；
 - libibverbs provider 注册。
 

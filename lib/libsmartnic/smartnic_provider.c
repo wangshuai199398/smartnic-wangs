@@ -639,6 +639,120 @@ static void smartnic_provider_mr_put_pd_locked(struct smartnic_provider_mr *mr)
 		mr->pd->refcount--;
 }
 
+static int smartnic_provider_validate_ah_attr(struct smartnic_provider_context *ctx,
+					      const struct smartnic_provider_ah_attr *attr)
+{
+	struct smartnic_provider_port_attr port_attr;
+	struct smartnic_provider_gid gid;
+
+	if (!attr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_validate_port(attr->port_num) < 0)
+		return -1;
+
+	smartnic_provider_translate_port_attr(attr->port_num, &port_attr);
+	if (port_attr.link_layer != SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET) {
+		errno = EOPNOTSUPP;
+		return -1;
+	}
+
+	if (!attr->is_global) {
+		errno = EOPNOTSUPP;
+		return -1;
+	}
+
+	if (smartnic_provider_get_gid(attr->port_num, attr->gid_index, &gid) < 0)
+		return -1;
+
+	if (attr->sl > 15 || attr->flow_label > 0x000fffffU ||
+	    attr->hop_limit == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	(void)ctx;
+	return 0;
+}
+
+static struct smartnic_provider_ah *
+smartnic_provider_ah_alloc_object(struct smartnic_provider_context *ctx,
+				  struct smartnic_provider_pd *pd,
+				  const struct smartnic_provider_ah_attr *attr,
+				  uint32_t kernel_handle)
+{
+	struct smartnic_provider_ah *ah;
+
+	ah = calloc(1, sizeof(*ah));
+	if (!ah)
+		return NULL;
+
+	ah->magic = SMARTNIC_PROVIDER_OBJECT_MAGIC_AH;
+	ah->ctx = ctx;
+	ah->pd = pd;
+	ah->kernel_handle = kernel_handle;
+	ah->attr = *attr;
+	ah->refcount = 1;
+	return ah;
+}
+
+static void smartnic_provider_ah_link_locked(struct smartnic_provider_context *ctx,
+					     struct smartnic_provider_ah *ah)
+{
+	ah->next = ctx->ah_list;
+	ctx->ah_list = ah;
+	ctx->ah_count++;
+}
+
+static int smartnic_provider_ah_unlink_locked(struct smartnic_provider_context *ctx,
+					      struct smartnic_provider_ah *ah)
+{
+	struct smartnic_provider_ah **cursor = &ctx->ah_list;
+
+	while (*cursor) {
+		if (*cursor == ah) {
+			*cursor = ah->next;
+			ah->next = NULL;
+			if (ctx->ah_count)
+				ctx->ah_count--;
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int smartnic_provider_ah_is_linked_locked(struct smartnic_provider_context *ctx,
+						 const struct smartnic_provider_ah *ah)
+{
+	const struct smartnic_provider_ah *cursor;
+
+	for (cursor = ctx->ah_list; cursor; cursor = cursor->next) {
+		if (cursor == ah)
+			return 1;
+	}
+
+	return 0;
+}
+
+static void smartnic_provider_ah_hold_pd_locked(struct smartnic_provider_ah *ah)
+{
+	ah->pd->child_count++;
+	ah->pd->refcount++;
+}
+
+static void smartnic_provider_ah_put_pd_locked(struct smartnic_provider_ah *ah)
+{
+	if (ah->pd->child_count)
+		ah->pd->child_count--;
+	if (ah->pd->refcount)
+		ah->pd->refcount--;
+}
+
 static int smartnic_provider_validate_node(const char *path,
 					   struct smartnic_provider_device *dev)
 {
@@ -1819,6 +1933,141 @@ int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr)
 	pthread_mutex_unlock(&ctx->lock);
 
 	free(mr);
+	return 0;
+}
+
+int smartnic_provider_create_ah(struct smartnic_provider_pd *pd,
+				const struct smartnic_provider_ah_attr *attr,
+				struct smartnic_provider_ah **ah)
+{
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_ah *new_ah;
+	uint32_t in[4];
+	uint32_t out[1] = { 0 };
+
+	if (!ah) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*ah = NULL;
+	if (!pd || pd->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_PD || !pd->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = pd->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_ah_attr(ctx, attr) < 0)
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_pd_is_linked_locked(ctx, pd)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	in[0] = pd->kernel_handle;
+	in[1] = ((uint32_t)attr->port_num & 0xffU) |
+		((attr->gid_index & 0xffffU) << 8) |
+		(((uint32_t)attr->sl & 0xffU) << 24);
+	in[2] = ((uint32_t)attr->traffic_class & 0xffU) |
+		((attr->flow_label & 0x000fffffU) << 8) |
+		(((uint32_t)attr->hop_limit & 0xffU) << 28);
+	in[3] = (attr->dest_qpn & 0x00ffffffU) |
+		(((uint32_t)attr->static_rate & 0xffU) << 24);
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_CREATE_AH,
+					   in, 4, out, 1) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (out[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EIO;
+		return -1;
+	}
+
+	new_ah = smartnic_provider_ah_alloc_object(ctx, pd, attr, out[0]);
+	if (!new_ah) {
+		uint32_t destroy_in[1] = { out[0] };
+		int saved_errno = errno;
+
+		(void)smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_AH,
+						     destroy_in, 1, NULL, 0);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = saved_errno;
+		return -1;
+	}
+
+	smartnic_provider_ah_hold_pd_locked(new_ah);
+	smartnic_provider_ah_link_locked(ctx, new_ah);
+	pthread_mutex_unlock(&ctx->lock);
+
+	*ah = new_ah;
+	return 0;
+}
+
+int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[1];
+
+	if (!ah || ah->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_AH || !ah->ctx ||
+	    !ah->pd) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = ah->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_ah_is_linked_locked(ctx, ah)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (ah->active_ops != 0 || ah->refcount > 1) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBUSY;
+		return -1;
+	}
+
+	in[0] = ah->kernel_handle;
+	if (in[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_AH,
+					   in, 1, NULL, 0) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (smartnic_provider_ah_unlink_locked(ctx, ah) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	smartnic_provider_ah_put_pd_locked(ah);
+	ah->magic = 0;
+	ah->ctx = NULL;
+	ah->pd = NULL;
+	ah->kernel_handle = 0;
+	pthread_mutex_unlock(&ctx->lock);
+
+	free(ah);
 	return 0;
 }
 
