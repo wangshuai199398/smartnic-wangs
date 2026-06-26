@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "[smartnic-driver-test] running static driver checks"
 python3 "$ROOT/drivers/linux/tests/test_smartnic_pci_driver_static.py"
 python3 "$ROOT/drivers/linux/tests/test_smartnic_driver_lifecycle_static.py"
+python3 "$ROOT/drivers/linux/tests/test_smartnic_driver_error_paths_static.py"
 
 if [[ -x "$ROOT/tools/smartnicctl" ]]; then
     "$ROOT/tools/smartnicctl" --help >/dev/null

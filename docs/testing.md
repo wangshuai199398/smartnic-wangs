@@ -41,6 +41,14 @@ SKIP: no /dev/smartnic* device; hardware probe/ioctl/poll/DMA smoke skipped
 
 只要脚本退出码为 0，这就是一次成功的无硬件运行。
 
+## 发布前检查
+
+```bash
+make driver-release-check
+```
+
+该入口运行 `tests/run_driver_release_checks.sh`，在 `driver-integration-test` 基础上增加 clean rebuild、`git diff --check`、可选 `W=1` Kbuild、可选 sparse/checkpatch、可选 shellcheck，以及 release checklist 文件存在性检查。
+
 ## 有硬件环境下运行
 
 在已构建驱动且硬件插上的 Linux 主机上：

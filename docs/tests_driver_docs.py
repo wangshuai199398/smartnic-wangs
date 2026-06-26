@@ -18,6 +18,7 @@ def require(text: str, needle: str, label: str) -> None:
 def main() -> None:
     driver = read(ROOT / "docs/driver.md")
     guide = read(ROOT / "docs/linux-driver-guide.md")
+    release = read(ROOT / "docs/driver-release-checklist.md")
     uapi = read(ROOT / "docs/uapi.md")
     troubleshooting = read(ROOT / "docs/troubleshooting.md")
     ex_ioctl = read(ROOT / "examples/smartnic_ioctl_example.c")
@@ -25,7 +26,7 @@ def main() -> None:
     ex_flow = read(ROOT / "examples/smartnic_user_flow_example.c")
     tasks = read(ROOT / "openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
 
-    combined_docs = "\n".join([driver, guide, uapi, troubleshooting])
+    combined_docs = "\n".join([driver, guide, release, uapi, troubleshooting])
     for needle in [
         "SMARTNIC_IOCTL_MBOX_EXEC",
         "SMARTNIC_IOCTL_QUEUE_CREATE",
@@ -73,16 +74,27 @@ def main() -> None:
         require(troubleshooting, needle, f"troubleshooting {needle}")
 
     for needle in [
-        "Build And Load",
-        "Probe And Remove Flow",
-        "CSR Mailbox Path",
-        "DMA Queue And mmap Rules",
-        "poll Semantics",
-        "MSI-X Interrupt Path",
+        "构建与加载",
+        "Probe 与 Remove 流程",
+        "CSR Mailbox 通路",
+        "DMA 队列与 mmap 规则",
+        "poll 语义",
+        "MSI-X 中断通路",
         "CONFIG_SMARTNIC_KUNIT",
         "examples/smartnic_user_flow_example.c",
     ]:
         require(guide, needle, f"Linux driver guide {needle}")
+
+    for needle in [
+        "make driver-release-check",
+        "CONFIG_SMARTNIC_KUNIT",
+        "Load/Unload Smoke Test",
+        "Resource Lifecycle Checklist",
+        "UAPI Consistency Checklist",
+        "SMARTNIC_IOCTL_MBOX_EXEC",
+        "POLLERR | POLLHUP",
+    ]:
+        require(release, needle, f"driver release checklist {needle}")
 
     for source in [ex_ioctl, ex_poll, ex_flow]:
         require(source, "#include <linux/smartnic_ioctl.h>", "example UAPI include")
@@ -99,6 +111,7 @@ def main() -> None:
     require(ex_flow, "poll(&pfd", "flow poll example")
     require(tasks, "- [x] 12.8 Implement driver documentation", "12.8 task completion")
     require(tasks, "- [x] 12.11 Implement Linux SmartNIC driver documentation", "12.11 task completion")
+    require(tasks, "- [x] 12.12 Finalize Linux SmartNIC driver integration", "12.12 task completion")
 
     print("smartnic driver documentation checks passed")
 

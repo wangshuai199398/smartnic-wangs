@@ -121,7 +121,7 @@
 - [x] 12.9 Implement end-to-end driver integration tests and packaging checks.
 - [x] 12.10 Implement driver self-tests, error-path tests, and integration tests for PCIe probe/remove, CSR mailbox, character device ioctl/mmap/poll, DMA mapping, and interrupt handling.
 - [x] 12.11 Implement Linux SmartNIC driver documentation, UAPI description, usage examples, and debugging guide.
-- [ ] 12.12 Add driver build and static analysis targets.
+- [x] 12.12 Finalize Linux SmartNIC driver integration with build, CI, cleanup, and release-readiness checks.
 
 ## 13. Userspace Verbs Library
 

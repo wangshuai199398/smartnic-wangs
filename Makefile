@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-integration-test userspace regression coverage clean
+.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-static-check driver-integration-test driver-release-check userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -69,9 +69,17 @@ driver:
 	@echo "[driver] 进入 Linux driver 子目录。"
 	@$(MAKE) -C drivers/linux
 
+driver-static-check:
+	@echo "[driver-static-check] 运行 Linux driver 静态一致性检查。"
+	@$(MAKE) -C drivers/linux static-check
+
 driver-integration-test:
 	@echo "[driver-integration-test] 运行 SmartNIC driver 集成和打包检查。"
 	@bash tests/run_driver_integration.sh
+
+driver-release-check:
+	@echo "[driver-release-check] 运行 SmartNIC driver 发布前检查。"
+	@bash tests/run_driver_release_checks.sh
 
 userspace:
 	@echo "[userspace] 进入 libsmartnic 用户态库子目录。"
