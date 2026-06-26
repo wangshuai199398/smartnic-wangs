@@ -49,6 +49,25 @@ dmesg | grep -i "DMA mask"
 
 驱动优先尝试 64 位，失败后回退到 32 位。
 
+如果 32 位也失败，probe 会 unwind 已申请的 PCI regions 并禁用设备。
+
+## Reset 超时
+
+常见原因：
+
+- `SMARTNIC_CSR_RESET` 偏移与 RTL 不匹配。
+- 硬件没有置位 `SMARTNIC_RESET_DONE`。
+- PCIe BAR 已映射但控制通路没有响应。
+
+排查方法：
+
+```bash
+dmesg | grep -i "reset"
+devmem <bar0 + 0x10>
+```
+
+当前驱动将 reset timeout 记录为 debug 日志，并继续读取 feature CSR，便于早期原型阶段观察硬件状态。
+
 ## MSI-X 分配失败
 
 常见原因：
@@ -65,6 +84,24 @@ dmesg | grep -i "MSI-X"
 ```
 
 驱动可接受少于默认数量的向量，最低到 `SMARTNIC_MIN_IRQ_VECTORS`。
+
+## 缺失 MSI-X 中断
+
+常见原因：
+
+- MSI-X capability 未启用或平台禁用了中断重映射。
+- `SMARTNIC_INTR_ENABLE` 未成功写入。
+- 硬件没有置位 `SMARTNIC_INTR_STATUS` 的已知事件位。
+- ISR 收到共享/无关中断并返回 `IRQ_NONE`。
+
+排查方法：
+
+```bash
+lspci -vv -s <bus:dev.fn> | grep -i msi
+dmesg | grep -Ei "smartnic|IRQ|MSI-X"
+```
+
+驱动在 teardown 时会先禁用设备中断，再 `synchronize_irq()`，最后 `free_irq()` 和 `pci_free_irq_vectors()`。
 
 ## Mailbox 超时
 
@@ -136,3 +173,15 @@ printf("mmap_offset=0x%llx ring_size=%llu\n", q.mmap_offset, q.ring_size);
 ## 无硬件环境
 
 烟雾测试和示例程序不应给出模糊不明的失败。它们应报告 `/dev/smartnic*` 不存在，并跳过仅依赖硬件的操作。
+
+## 12.10 测试和故障注入钩子
+
+`CONFIG_SMARTNIC_KUNIT` 启用时，驱动暴露 test-only fault hook 布局，用于记录这些故障注入点：
+
+- BAR mapping failure；
+- DMA mask setup failure；
+- mailbox completion failure；
+- char device registration failure；
+- MSI-X allocation failure。
+
+这些字段只用于测试合同，生产构建不携带该状态。

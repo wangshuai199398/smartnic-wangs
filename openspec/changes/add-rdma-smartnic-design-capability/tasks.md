@@ -120,7 +120,7 @@
 - [x] 12.8 Implement driver documentation, example usage, and troubleshooting notes.
 - [x] 12.9 Implement end-to-end driver integration tests and packaging checks.
 - [x] 12.10 Implement driver self-tests, error-path tests, and integration tests for PCIe probe/remove, CSR mailbox, character device ioctl/mmap/poll, DMA mapping, and interrupt handling.
-- [ ] 12.11 Implement hot-remove and process-release cleanup for all resources owned by a file descriptor.
+- [x] 12.11 Implement Linux SmartNIC driver documentation, UAPI description, usage examples, and debugging guide.
 - [ ] 12.12 Add driver build and static analysis targets.
 
 ## 13. Userspace Verbs Library

@@ -81,6 +81,14 @@
 
 队列 mmap 使用 `dma_mmap_coherent()`。无效偏移量、错误的所有者 fd 或错误的大小将返回 `-EINVAL` 或 `-EPERM`。
 
+规则：
+
+- 队列 mmap 的 `offset` 必须等于 `SMARTNIC_IOCTL_QUEUE_CREATE` 返回的 `mmap_offset`；
+- mmap 必须通过创建该队列的同一个文件描述符发起；
+- mmap 长度不能超过 `ring_size`；
+- doorbell/MMIO mmap 只能映射驱动批准的 BAR 范围；
+- 内核虚拟地址不会暴露给用户态。
+
 ## poll
 
 `poll()` 报告：
@@ -108,3 +116,12 @@
 | `-ENOSPC` | 设备报告无可用资源 |
 | `-ENOMEM` | 主机分配失败 |
 | `-EIO` | 硬件/内部错误 |
+
+## 用户态兼容性期望
+
+- 当前 UAPI 是 Linux-only，用户程序应包含 `<linux/smartnic_ioctl.h>`；
+- 不要复制 ioctl 编号或结构体定义，避免 ABI 漂移；
+- 所有结构体调用前必须设置 `struct_size`；
+- 保留字段必须写 0；
+- 当前驱动提供控制面和 DMA ring 原型能力，不提供完整 verbs 数据面 ABI；
+- 32 位 compat ioctl 复用同一套结构体布局，结构体字段使用固定宽度类型。

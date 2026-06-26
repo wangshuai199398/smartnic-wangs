@@ -5,7 +5,7 @@ CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PROJECT_ROOT := ..
 UAPI_INC := $(PROJECT_ROOT)/include/uapi
 
-EXAMPLES := smartnic_ioctl_example smartnic_poll_example
+EXAMPLES := smartnic_ioctl_example smartnic_poll_example smartnic_user_flow_example
 
 .PHONY: all clean
 
