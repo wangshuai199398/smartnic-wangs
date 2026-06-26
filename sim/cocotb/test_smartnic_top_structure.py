@@ -24,7 +24,7 @@ REQUIRED_INSTANCES = [
     "dma_descriptor_dispatcher u_dma_dispatcher",
     "mr_table u_mr_table",
     "rc_send_engine u_rc_send_engine",
-    "ud_tx_engine u_ud_tx_engine",
+    "ud_datapath_top u_ud_datapath_top",
 ]
 
 

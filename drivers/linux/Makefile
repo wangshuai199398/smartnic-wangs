@@ -1,10 +1,32 @@
-# Linux driver 最小构建入口。
-# 当前阶段不编译内核模块，只保留后续接入 Kbuild 的稳定目标。
+# Linux driver 构建入口。
+# 如果本机有 Linux kernel headers，则构建 out-of-tree module；
+# 否则运行静态检查并跳过真实 Kbuild，方便 macOS/教学环境继续验证结构。
 
-.PHONY: all clean
+KDIR ?= /lib/modules/$(shell uname -r)/build
+PWD := $(CURDIR)
 
-all:
-	@echo "[drivers/linux] Linux driver 构建占位：后续会接入 Kbuild/out-of-tree module。"
+obj-m := smartnic.o
+smartnic-y := smartnic_pci.o
+
+.PHONY: all modules syntax-check clean
+
+all: syntax-check modules
+
+modules:
+	@if [ -f "$(KDIR)/Makefile" ]; then \
+		echo "[drivers/linux] 构建 SmartNIC out-of-tree kernel module。"; \
+		$(MAKE) -C "$(KDIR)" M="$(PWD)" modules; \
+	else \
+		echo "[drivers/linux] 未找到 Linux kernel headers，跳过真实 Kbuild。"; \
+	fi
+
+syntax-check:
+	@python3 tests/test_smartnic_pci_driver_static.py
 
 clean:
-	@echo "[drivers/linux] 清理 Linux driver 构建产物占位。"
+	@if [ -f "$(KDIR)/Makefile" ]; then \
+		$(MAKE) -C "$(KDIR)" M="$(PWD)" clean; \
+	else \
+		echo "[drivers/linux] 未找到 Linux kernel headers，跳过 Kbuild clean。"; \
+	fi
+	@rm -f *.o *.ko *.mod *.mod.c *.order *.symvers .*.cmd

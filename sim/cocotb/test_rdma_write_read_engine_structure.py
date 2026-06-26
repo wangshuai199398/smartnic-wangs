@@ -64,10 +64,12 @@ def test_smartnic_top_integrates_rdma_engine():
     assert "u_rdma_write_read_engine" in text
     assert "rdma_wr_test_valid" in text
     assert "rdma_read_resp_test_valid" in text
-    assert "tx_build_valid = cnp_build_valid || rc_build_valid || rdma_build_valid" in text
-    assert "rc_build_valid ? rc_build_req : rdma_build_req" in text
-    assert "top_completion_valid = rc_completion_valid || rdma_completion_valid" in text
-    assert "top_completion_event = rc_completion_valid ? rc_completion_event : rdma_completion_event" in text
+    assert "tx_build_valid = cnp_build_valid || rc_build_valid || rdma_build_valid || ud_build_valid" in text
+    assert "rc_build_valid ? rc_build_req :" in text
+    assert "rdma_build_valid ? rdma_build_req : ud_build_req" in text
+    assert "top_completion_valid = rc_completion_valid || rdma_completion_valid || ud_completion_valid" in text
+    assert "top_completion_event = rc_completion_valid ? rc_completion_event :" in text
+    assert "rdma_completion_valid ? rdma_completion_event : ud_completion_event" in text
 
 
 def test_mock_write_and_read_flow_order():

@@ -14,4 +14,10 @@
 - SR-IOV PF/VF 管理
 - 进程退出和设备热拔出的资源清理
 
-当前阶段只创建目录，不实现驱动代码。
+当前已经实现第一步 PCIe probe/remove 骨架，代码位于 `drivers/linux/`：
+
+- `smartnic_pci.c`：PCI ID table、probe/remove、BAR 映射、DMA mask、reset 和 feature discovery；
+- `smartnic_pci.h`：驱动私有状态；
+- `smartnic_regs.h`：PCI ID、BAR 和早期 CSR offset 宏。
+
+后续阶段会继续补充 CSR mailbox、字符设备、mmap、资源管理、MSI-X 和 SR-IOV。

@@ -91,6 +91,36 @@ module smartnic_top
     input  logic [511:0]                 rdma_read_resp_test_payload,
     input  logic                         rdma_read_resp_test_error,
 
+    // 11.6 UD datapath 测试入口。真实 SQ/RQ WQE fetch 和 AH CSR 管理由后续任务替换。
+    input  logic                         ud_ah_create_valid,
+    output logic                         ud_ah_create_ready,
+    input  ah_entry_t                    ud_ah_create_entry,
+    output logic                         ud_ah_create_rsp_valid,
+    input  logic                         ud_ah_create_rsp_ready,
+    output ah_table_status_e             ud_ah_create_status,
+    input  logic                         ud_tx_test_valid,
+    output logic                         ud_tx_test_ready,
+    input  logic [15:0]                  ud_tx_test_desc_id,
+    input  logic [QP_ID_W-1:0]           ud_tx_test_qpn,
+    input  logic [CQ_ID_W-1:0]           ud_tx_test_cqn,
+    input  logic [VF_ID_W-1:0]           ud_tx_test_owner_function,
+    input  logic [PD_ID_W-1:0]           ud_tx_test_pd_id,
+    input  logic [WR_ID_W-1:0]           ud_tx_test_wr_id,
+    input  logic [AH_ID_W-1:0]           ud_tx_test_ah_id,
+    input  logic [QP_ID_W-1:0]           ud_tx_test_dest_qpn,
+    input  logic [QKEY_W-1:0]            ud_tx_test_qkey,
+    input  logic [PSN_W-1:0]             ud_tx_test_psn,
+    input  logic [ADDR_W-1:0]            ud_tx_test_local_va,
+    input  logic [KEY_W-1:0]             ud_tx_test_lkey,
+    input  logic [511:0]                 ud_tx_test_payload,
+    input  logic [15:0]                  ud_tx_test_len,
+    input  logic                         ud_rx_rq_available,
+    input  logic [WR_ID_W-1:0]           ud_rx_rq_wr_id,
+    input  logic [CQ_ID_W-1:0]           ud_rx_rq_cqn,
+    input  logic [ADDR_W-1:0]            ud_rx_rq_buffer_addr,
+    input  logic [KEY_W-1:0]             ud_rx_rq_lkey,
+    input  logic [DMA_LEN_W-1:0]         ud_rx_rq_buffer_len,
+
     // 简化 Ethernet/RoCEv2 frame 流接口。
     input  logic                         eth_rx_valid,
     output logic                         eth_rx_ready,
@@ -531,6 +561,48 @@ module smartnic_top
     logic [PSN_W-1:0] rdma_debug_next_psn;
     logic [3:0] rdma_debug_state;
     cmpl_status_e rdma_debug_status;
+    logic ud_tx_dma_read_valid;
+    logic [QP_ID_W-1:0] ud_tx_dma_read_qpn;
+    logic [ADDR_W-1:0] ud_tx_dma_read_local_va;
+    logic [KEY_W-1:0] ud_tx_dma_read_lkey;
+    logic [15:0] ud_tx_dma_read_len;
+    logic ud_rx_dma_write_valid;
+    rq_dma_write_req_t ud_rx_dma_write_req;
+    logic [511:0] ud_rx_dma_write_payload_data;
+    logic [15:0] ud_rx_dma_write_payload_len;
+    logic ud_rx_dma_write_done_ready;
+    logic ud_completion_valid;
+    logic ud_completion_ready;
+    completion_event_t ud_completion_event;
+    logic ud_drop_valid;
+    ud_rx_status_e ud_drop_status;
+    logic [QP_ID_W-1:0] ud_drop_qpn;
+    logic [QP_ID_W-1:0] ud_drop_source_qpn;
+    logic [15:0] ud_drop_error_code;
+    ud_rx_counters_t ud_rx_counters;
+    logic [31:0] ud_ah_lookup_fail_count;
+    ud_tx_status_e ud_debug_tx_status;
+    ud_rx_status_e ud_debug_rx_status;
+    logic [2:0] ud_debug_tx_state;
+    logic ud_rx_qp_read_valid;
+    logic ud_rx_qp_read_ready;
+    logic [QP_ID_W-1:0] ud_rx_qp_read_qpn;
+    logic [VF_ID_W-1:0] ud_rx_qp_read_function_id;
+    logic ud_rx_qp_read_pf_bypass;
+    logic ud_rx_qp_read_rsp_valid;
+    logic ud_rx_qp_read_rsp_ready;
+    logic ud_rx_qp_read_hit;
+    qp_table_status_e ud_rx_qp_read_status;
+    qp_context_t ud_rx_qp_read_data;
+    logic ud_rx_meta_valid;
+    logic ud_rx_meta_ready;
+    logic ud_rx_payload_valid;
+    logic ud_rx_payload_ready;
+    packet_payload_stream_t ud_rx_payload_stream;
+    logic ud_rx_rq_consume_valid;
+    logic [QP_ID_W-1:0] ud_rx_rq_consume_qpn;
+    logic [VF_ID_W-1:0] ud_rx_rq_consume_owner_function;
+    logic [QP_ID_W-1:0] ud_rx_rq_consume_source_qpn;
 
     rc_pipeline_top u_rc_pipeline_top (
         .clk(clk),
@@ -636,6 +708,122 @@ module smartnic_top
         .debug_status(rdma_debug_status)
     );
 
+    assign ud_rx_meta_valid = marked_valid && (marked_meta.opcode == ROCE_OPCODE_UD_SEND_ONLY);
+    assign ud_rx_payload_valid = ud_rx_meta_valid;
+    assign ud_rx_payload_stream = '{
+        desc_id: marked_meta.desc_id,
+        qpn: marked_meta.qpn,
+        cqn: marked_meta.cqn,
+        owner_function: marked_meta.owner_function,
+        pd_id: marked_meta.pd_id,
+        opcode: marked_meta.opcode,
+        status: PKT_PAYLOAD_OK,
+        error_code: 16'd0,
+        ecn: marked_meta.ecn,
+        ecn_valid: marked_meta.ecn_valid,
+        ecn_ce: marked_meta.ecn_ce,
+        data: eth_rx_data,
+        payload_len: marked_meta.payload_len,
+        valid_bytes: marked_meta.payload_len,
+        byte_offset: 16'd0,
+        first: 1'b1,
+        last: 1'b1,
+        has_imm: marked_meta.has_imm,
+        imm_data: marked_meta.imm_data,
+        remote_va: marked_meta.remote_va,
+        rkey: marked_meta.rkey,
+        dma_length: marked_meta.dma_length,
+        dest_qpn: marked_meta.dest_qpn,
+        psn: marked_meta.psn
+    };
+
+    ud_datapath_top u_ud_datapath_top (
+        .clk(clk),
+        .rst_n(core_rst_n),
+        .ah_create_valid(ud_ah_create_valid),
+        .ah_create_ready(ud_ah_create_ready),
+        .ah_create_entry(ud_ah_create_entry),
+        .ah_create_rsp_valid(ud_ah_create_rsp_valid),
+        .ah_create_rsp_ready(ud_ah_create_rsp_ready),
+        .ah_create_status(ud_ah_create_status),
+        .tx_req_valid(ud_tx_test_valid),
+        .tx_req_ready(ud_tx_test_ready),
+        .tx_desc_id(ud_tx_test_desc_id),
+        .tx_qpn(ud_tx_test_qpn),
+        .tx_cqn(ud_tx_test_cqn),
+        .tx_owner_function(ud_tx_test_owner_function),
+        .tx_pd_id(ud_tx_test_pd_id),
+        .tx_wr_id(ud_tx_test_wr_id),
+        .tx_ah_id(ud_tx_test_ah_id),
+        .tx_dest_qpn(ud_tx_test_dest_qpn),
+        .tx_qkey(ud_tx_test_qkey),
+        .tx_psn(ud_tx_test_psn),
+        .tx_local_va(ud_tx_test_local_va),
+        .tx_lkey(ud_tx_test_lkey),
+        .tx_payload_data(ud_tx_test_payload),
+        .tx_payload_len(ud_tx_test_len),
+        .tx_solicited(1'b0),
+        .tx_completion_required(1'b1),
+        .rx_meta_valid(ud_rx_meta_valid),
+        .rx_meta_ready(ud_rx_meta_ready),
+        .rx_meta(marked_meta),
+        .rx_payload_valid(ud_rx_payload_valid),
+        .rx_payload_ready(ud_rx_payload_ready),
+        .rx_payload(ud_rx_payload_stream),
+        .qp_read_valid(ud_rx_qp_read_valid),
+        .qp_read_ready(ud_rx_qp_read_ready),
+        .qp_read_qpn(ud_rx_qp_read_qpn),
+        .qp_read_function_id(ud_rx_qp_read_function_id),
+        .qp_read_pf_bypass(ud_rx_qp_read_pf_bypass),
+        .qp_read_rsp_valid(ud_rx_qp_read_rsp_valid),
+        .qp_read_rsp_ready(ud_rx_qp_read_rsp_ready),
+        .qp_read_hit(ud_rx_qp_read_hit),
+        .qp_read_status(ud_rx_qp_read_status),
+        .qp_read_data(ud_rx_qp_read_data),
+        .rx_rq_wqe_available(ud_rx_rq_available),
+        .rx_rq_wqe_wr_id(ud_rx_rq_wr_id),
+        .rx_rq_wqe_cqn(ud_rx_rq_cqn),
+        .rx_rq_wqe_buffer_addr(ud_rx_rq_buffer_addr),
+        .rx_rq_wqe_lkey(ud_rx_rq_lkey),
+        .rx_rq_wqe_buffer_len(ud_rx_rq_buffer_len),
+        .rx_rq_consume_valid(ud_rx_rq_consume_valid),
+        .rx_rq_consume_ready(1'b1),
+        .rx_rq_consume_qpn(ud_rx_rq_consume_qpn),
+        .rx_rq_consume_owner_function(ud_rx_rq_consume_owner_function),
+        .rx_rq_consume_source_qpn(ud_rx_rq_consume_source_qpn),
+        .tx_dma_read_valid(ud_tx_dma_read_valid),
+        .tx_dma_read_ready(1'b1),
+        .tx_dma_read_qpn(ud_tx_dma_read_qpn),
+        .tx_dma_read_local_va(ud_tx_dma_read_local_va),
+        .tx_dma_read_lkey(ud_tx_dma_read_lkey),
+        .tx_dma_read_len(ud_tx_dma_read_len),
+        .rx_dma_write_valid(ud_rx_dma_write_valid),
+        .rx_dma_write_ready(1'b1),
+        .rx_dma_write_req(ud_rx_dma_write_req),
+        .rx_dma_write_payload_data(ud_rx_dma_write_payload_data),
+        .rx_dma_write_payload_len(ud_rx_dma_write_payload_len),
+        .rx_dma_write_done_valid(ud_rx_dma_write_valid),
+        .rx_dma_write_done_ready(ud_rx_dma_write_done_ready),
+        .rx_dma_write_error(1'b0),
+        .packet_valid(ud_build_valid),
+        .packet_ready(ud_build_ready),
+        .packet_req(ud_build_req),
+        .completion_valid(ud_completion_valid),
+        .completion_ready(ud_completion_ready),
+        .completion_event(ud_completion_event),
+        .drop_valid(ud_drop_valid),
+        .drop_ready(1'b1),
+        .drop_status(ud_drop_status),
+        .drop_qpn(ud_drop_qpn),
+        .drop_source_qpn(ud_drop_source_qpn),
+        .drop_error_code(ud_drop_error_code),
+        .rx_counters(ud_rx_counters),
+        .ah_lookup_fail_count(ud_ah_lookup_fail_count),
+        .debug_tx_status(ud_debug_tx_status),
+        .debug_rx_status(ud_debug_rx_status),
+        .debug_tx_state(ud_debug_tx_state)
+    );
+
     // ------------------------------------------------------------------
     // Packet ingress, ECN/CNP, and packet builder boundary
     // ------------------------------------------------------------------
@@ -663,12 +851,16 @@ module smartnic_top
     packet_build_req_t rdma_build_req;
     logic rdma_build_valid;
     logic rdma_build_ready;
+    packet_build_req_t ud_build_req;
+    logic ud_build_valid;
+    logic ud_build_ready;
     packet_build_req_t tx_build_req;
     logic tx_build_valid;
     logic tx_build_ready;
     logic cnp_class_event_valid;
     logic cnp_class_event_ready;
     cnp_event_t cnp_class_event;
+    logic cnp_marked_ready;
 
     roce_packet_parser u_packet_parser (
         .clk(clk),
@@ -711,7 +903,7 @@ module smartnic_top
         .clk(clk),
         .rst_n(core_rst_n),
         .meta_valid(marked_valid),
-        .meta_ready(marked_ready),
+        .meta_ready(cnp_marked_ready),
         .meta_in(marked_meta),
         .qp_lookup_ready(1'b1),
         .qp_lookup_hit(1'b1),
@@ -721,6 +913,9 @@ module smartnic_top
         .dcqcn_event(cnp_class_event),
         .cnp_drop_ready(1'b1)
     );
+
+    assign marked_ready = cnp_marked_ready &&
+                          (!ud_rx_meta_valid || (ud_rx_meta_ready && ud_rx_payload_ready));
 
     cnp_packet_generator u_cnp_generator (
         .clk(clk),
@@ -752,12 +947,14 @@ module smartnic_top
         .build_req(cnp_build_req)
     );
 
-    assign tx_build_valid = cnp_build_valid || rc_build_valid || rdma_build_valid;
+    assign tx_build_valid = cnp_build_valid || rc_build_valid || rdma_build_valid || ud_build_valid;
     assign tx_build_req = cnp_build_valid ? cnp_build_req :
-                          (rc_build_valid ? rc_build_req : rdma_build_req);
+                          (rc_build_valid ? rc_build_req :
+                          (rdma_build_valid ? rdma_build_req : ud_build_req));
     assign cnp_build_ready = tx_build_ready;
     assign rc_build_ready = !cnp_build_valid && tx_build_ready;
     assign rdma_build_ready = !cnp_build_valid && !rc_build_valid && tx_build_ready;
+    assign ud_build_ready = !cnp_build_valid && !rc_build_valid && !rdma_build_valid && tx_build_ready;
 
     roce_packet_builder u_packet_builder (
         .clk(clk),
@@ -911,11 +1108,16 @@ module smartnic_top
         .context_write_index('0),
         .context_write_data('0),
         .context_write_rsp_ready(1'b1),
-        .context_read_valid(1'b0),
-        .context_read_qpn('0),
-        .context_read_function_id('0),
-        .context_read_pf_bypass(1'b0),
-        .context_read_rsp_ready(1'b1),
+        .context_read_valid(ud_rx_qp_read_valid),
+        .context_read_qpn(ud_rx_qp_read_qpn),
+        .context_read_function_id(ud_rx_qp_read_function_id),
+        .context_read_pf_bypass(ud_rx_qp_read_pf_bypass),
+        .context_read_rsp_ready(ud_rx_qp_read_rsp_ready),
+        .context_read_ready(ud_rx_qp_read_ready),
+        .context_read_rsp_valid(ud_rx_qp_read_rsp_valid),
+        .context_read_hit(ud_rx_qp_read_hit),
+        .context_read_data(ud_rx_qp_read_data),
+        .context_read_status(ud_rx_qp_read_status),
         .sq_pi_update_valid(db_sq_pi_update_valid),
         .sq_pi_update_ready(db_sq_pi_update_ready),
         .sq_pi_update_qpn(db_sq_pi_update_qpn),
@@ -989,10 +1191,12 @@ module smartnic_top
         .overflow_clear_rsp_ready(1'b1)
     );
 
-    assign top_completion_valid = rc_completion_valid || rdma_completion_valid;
-    assign top_completion_event = rc_completion_valid ? rc_completion_event : rdma_completion_event;
+    assign top_completion_valid = rc_completion_valid || rdma_completion_valid || ud_completion_valid;
+    assign top_completion_event = rc_completion_valid ? rc_completion_event :
+                                  (rdma_completion_valid ? rdma_completion_event : ud_completion_event);
     assign rc_completion_ready = top_completion_ready;
     assign rdma_completion_ready = !rc_completion_valid && top_completion_ready;
+    assign ud_completion_ready = !rc_completion_valid && !rdma_completion_valid && top_completion_ready;
 
     completion_engine u_completion_engine (
         .clk(clk),
@@ -1102,7 +1306,6 @@ module smartnic_top
     logic [PSN_W-1:0] rc_next_psn;
     logic [3:0] rc_outstanding_count;
     rc_send_status_e rc_debug_status;
-    ud_tx_status_e ud_debug_status;
 
     rc_send_engine u_rc_send_engine (
         .clk(clk),
@@ -1125,22 +1328,6 @@ module smartnic_top
         .next_psn(rc_next_psn),
         .outstanding_count(rc_outstanding_count),
         .debug_status(rc_debug_status)
-    );
-
-    ud_tx_engine u_ud_tx_engine (
-        .clk(clk),
-        .rst_n(core_rst_n),
-        .ud_req_valid(1'b0),
-        .ud_req('0),
-        .ah_lookup_ready(1'b1),
-        .ah_lookup_resp_valid(1'b0),
-        .ah_lookup_hit(1'b0),
-        .ah_lookup_entry('0),
-        .ah_lookup_error_code('0),
-        .packet_ready(1'b1),
-        .completion_ready(1'b1),
-        .wqe_error_ready(1'b1),
-        .debug_status(ud_debug_status)
     );
 
     assign debug_qp_status = {31'd0, core_rst_n};

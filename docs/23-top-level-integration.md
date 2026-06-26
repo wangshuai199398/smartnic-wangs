@@ -152,9 +152,31 @@ RDMA Read hook
 
 Packet builder 输入现在按 `CNP > RC Send/Recv > RDMA Write/Read` 的固定优先级选择。Completion event 输入按 `RC completion > RDMA completion` 选择。该阶段只做 one-sided datapath 的最小顶层贯通；真实 MR permission pipeline、PCIe DMA completion、多包 RDMA Read response 和 retry/ACK/NAK 留给后续集成。
 
+## 11.6 UD Transmit / Receive 数据通路
+
+11.6 新增 `rtl/transport/ud_datapath_top.sv`，用于把 AH table、UD TX engine 和 UD RX engine 接入顶层：
+
+```text
+UD Send hook
+  -> ud_datapath_top
+  -> TX DMA read hook
+  -> AH lookup
+  -> packet builder(opcode=UD_SEND_ONLY + DETH)
+  -> completion_engine
+
+UD RX packet
+  -> packet parser / ECN marker
+  -> ud_datapath_top
+  -> QP context_read
+  -> Q_Key validation
+  -> RX DMA write hook
+  -> completion_engine
+```
+
+Packet builder 输入优先级扩展为 `CNP > RC Send/Recv > RDMA Write/Read > UD Send`。Completion event 输入优先级扩展为 `RC > RDMA > UD`。UD receive 的 source QPN 由 `ud_rx_completion_t.source_qpn` 保留，并在当前最小集成中通过 completion event 的 `vendor_error` 字段传给后续 CQE/CQE parser。
+
 ## 后续任务边界
 
-- 11.6：连接 UD transmit / receive 数据路径。
 - 11.7：增加 reset、CSR、Doorbell-to-CQE、RC/UD、MSI-X top-level tests。
 
 ## 验证

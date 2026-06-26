@@ -105,12 +105,12 @@
 - [x] 11.3 Connect Doorbell path to QP SQ/RQ and CQ arm logic.
 - [x] 11.4 Connect QP, DMA, packet, transport, completion, and CQ managers for RC Send/Recv minimal loop.
 - [x] 11.5 Connect RDMA Write and RDMA Read datapaths.
-- [ ] 11.6 Connect UD transmit and receive datapaths.
-- [ ] 11.7 Add top-level tests for reset, CSR command, Doorbell-to-CQE minimal loop, RC Send, RDMA Write, RDMA Read, UD Send, and MSI-X completion interrupt.
+- [x] 11.6 Connect UD transmit and receive datapaths.
+- [x] 11.7 Add top-level tests for reset, CSR command, Doorbell-to-CQE minimal loop, RC Send, RDMA Write, RDMA Read, UD Send, and MSI-X completion interrupt.
 
 ## 12. Linux Kernel Driver
 
-- [ ] 12.1 Implement PCIe driver probe/remove with BAR mapping, DMA mask setup, reset, feature discovery, and teardown.
+- [x] 12.1 Implement PCIe driver probe/remove with BAR mapping, DMA mask setup, reset, feature discovery, and teardown.
 - [ ] 12.2 Implement CSR mailbox helper with timeout, error-code mapping, and locking.
 - [ ] 12.3 Implement character device open, release, ioctl dispatch, mmap, and poll operations.
 - [ ] 12.4 Implement resource allocators for PD, CQ, QP, MR, AH, Doorbell pages, queue buffers, and mmap offsets.
