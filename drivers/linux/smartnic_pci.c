@@ -16,6 +16,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 
+#include "smartnic_chrdev.h"
 #include "smartnic_pci.h"
 #include "smartnic_regs.h"
 
@@ -203,6 +204,10 @@ static int smartnic_pci_probe(struct pci_dev *pdev,
 	mutex_init(&sdev->mbox_lock);
 	spin_lock_init(&sdev->irq_lock);
 	init_waitqueue_head(&sdev->admin_wq);
+	init_waitqueue_head(&sdev->event_wq);
+	init_waitqueue_head(&sdev->open_wq);
+	atomic_set(&sdev->open_count, 0);
+	atomic_set(&sdev->event_pending, 0);
 	pci_set_drvdata(pdev, sdev);
 
 	err = pci_enable_device_mem(pdev);
@@ -240,9 +245,20 @@ static int smartnic_pci_probe(struct pci_dev *pdev,
 	sdev->state = SMARTNIC_DEV_READY;
 	mutex_unlock(&sdev->state_lock);
 
+	err = smartnic_chrdev_register(sdev);
+	if (err) {
+		dev_err(&pdev->dev, "failed to register char device: %d\n", err);
+		goto err_mark_quiescing;
+	}
+
 	dev_info(&pdev->dev, "SmartNIC PCIe device probed successfully\n");
 	return 0;
 
+err_mark_quiescing:
+	mutex_lock(&sdev->state_lock);
+	sdev->state = SMARTNIC_DEV_QUIESCING;
+	mutex_unlock(&sdev->state_lock);
+	wake_up_all(&sdev->event_wq);
 err_unmap_bars:
 	smartnic_unmap_bars(sdev);
 err_clear_master:
@@ -267,6 +283,7 @@ static void smartnic_pci_remove(struct pci_dev *pdev)
 	dev_info(&pdev->dev, "removing SmartNIC PCIe device\n");
 
 	smartnic_quiesce(sdev);
+	smartnic_chrdev_unregister(sdev);
 	smartnic_disable_interrupts(sdev);
 	smartnic_unmap_bars(sdev);
 	pci_clear_master(pdev);

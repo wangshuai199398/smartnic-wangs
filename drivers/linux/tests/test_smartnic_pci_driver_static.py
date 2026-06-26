@@ -21,8 +21,11 @@ def main() -> None:
     pci_h = read(ROOT / "smartnic_pci.h")
     mbox_c = read(ROOT / "smartnic_mbox.c")
     mbox_h = read(ROOT / "smartnic_mbox.h")
+    chrdev_c = read(ROOT / "smartnic_chrdev.c")
+    chrdev_h = read(ROOT / "smartnic_chrdev.h")
     regs_h = read(ROOT / "smartnic_regs.h")
     makefile = read(ROOT / "Makefile")
+    ioctl_h = read(REPO / "include/uapi/linux/smartnic_ioctl.h")
     tasks = read(REPO / "openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
 
     for needle, label in [
@@ -70,6 +73,12 @@ def main() -> None:
         ("spinlock_t irq_lock", "IRQ lock"),
         ("struct mutex mbox_lock", "mailbox lock"),
         ("bool reset_active", "reset-active guard"),
+        ("wait_queue_head_t event_wq", "poll wait queue"),
+        ("wait_queue_head_t open_wq", "open lifetime wait queue"),
+        ("atomic_t open_count", "open reference count"),
+        ("atomic_t event_pending", "poll event flag"),
+        ("struct cdev cdev", "cdev storage"),
+        ("dev_t chrdev_devt", "char dev number"),
     ]:
         require(pci_h, needle, label)
 
@@ -88,7 +97,8 @@ def main() -> None:
         require(regs_h, needle, label)
 
     require(makefile, "obj-m := smartnic.o", "Kbuild module object")
-    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o", "driver object list")
+    require(makefile, "ccflags-y += -I$(src)/../../include", "UAPI include path")
+    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o", "driver object list")
     require(tasks, "- [x] 12.1 Implement PCIe driver probe/remove", "12.1 task completion")
 
     for needle, label in [
@@ -114,6 +124,57 @@ def main() -> None:
         require(mbox_h, needle, label)
 
     require(tasks, "- [x] 12.2 Implement CSR mailbox helper", "12.2 task completion")
+
+    for needle, label in [
+        ("#define SMARTNIC_IOCTL_MAGIC", "ioctl magic"),
+        ("struct smartnic_ioctl_mbox", "mailbox ioctl struct"),
+        ("SMARTNIC_IOCTL_MBOX_EXEC", "mailbox ioctl command"),
+        ("_IOWR", "read/write ioctl encoding"),
+    ]:
+        require(ioctl_h, needle, label)
+
+    for needle, label in [
+        ("alloc_chrdev_region", "char dev allocation"),
+        ("cdev_init", "cdev init"),
+        ("cdev_add", "cdev add"),
+        ("class_create", "class create"),
+        ("device_create", "device node create"),
+        ("smartnic_chrdev_open", "open op"),
+        ("smartnic_chrdev_release", "release op"),
+        ("smartnic_chrdev_ioctl", "ioctl op"),
+        ("smartnic_chrdev_mmap", "mmap op"),
+        ("smartnic_chrdev_poll", "poll op"),
+        ("compat_ioctl", "compat ioctl op"),
+        ("copy_from_user", "safe user input copy"),
+        ("copy_to_user", "safe user output copy"),
+        ("-ENOTTY", "unknown ioctl error"),
+        ("smartnic_mbox_exec", "mailbox dispatch"),
+        ("io_remap_pfn_range", "IO mmap remap"),
+        ("pgprot_noncached", "noncached mmap protection"),
+        ("poll_wait", "poll wait queue"),
+        ("POLLIN | POLLRDNORM", "readable poll mask"),
+        ("POLLOUT | POLLWRNORM", "writable poll mask"),
+        ("POLLERR | POLLHUP", "teardown poll mask"),
+        ("wake_up_all(&sdev->event_wq)", "teardown poll wake"),
+        ("wait_event(sdev->open_wq", "remove waits for open refs"),
+        ("device_destroy", "device destroy"),
+        ("unregister_chrdev_region", "char dev unregister"),
+    ]:
+        require(chrdev_c, needle, label)
+
+    for needle, label in [
+        ("smartnic_chrdev_register", "char dev register declaration"),
+        ("smartnic_chrdev_unregister", "char dev unregister declaration"),
+    ]:
+        require(chrdev_h, needle, label)
+
+    for needle, label in [
+        ("smartnic_chrdev_register(sdev)", "probe char dev registration"),
+        ("smartnic_chrdev_unregister(sdev)", "remove char dev cleanup"),
+    ]:
+        require(pci_c, needle, label)
+
+    require(tasks, "- [x] 12.3 Implement character device open", "12.3 task completion")
 
     print("smartnic PCI driver static checks passed")
 

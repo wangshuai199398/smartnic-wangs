@@ -10,7 +10,10 @@
 | `drivers/linux/smartnic_pci.h` | 驱动私有 `smartnic_dev`、BAR 状态、锁和设备状态 |
 | `drivers/linux/smartnic_mbox.c` | CSR mailbox 同步命令 helper、timeout、错误码映射和命令串行化 |
 | `drivers/linux/smartnic_mbox.h` | mailbox helper 对后续 ioctl/resource 层暴露的内部 API |
+| `drivers/linux/smartnic_chrdev.c` | `/dev/smartnicX` 字符设备、open/release/ioctl/mmap/poll |
+| `drivers/linux/smartnic_chrdev.h` | 字符设备注册/注销接口 |
 | `drivers/linux/smartnic_regs.h` | PCI vendor/device ID、BAR 编号和早期 CSR offset 宏 |
+| `include/uapi/linux/smartnic_ioctl.h` | 用户态可见的最小 ioctl ABI |
 | `drivers/linux/tests/test_smartnic_pci_driver_static.py` | compile-only 前的静态结构检查 |
 
 ## Probe 流程
@@ -84,3 +87,25 @@ probe 的每一步都有对应 `goto` unwind label：
 | hardware/internal | `-EIO` |
 
 这个 helper 暂时只处理寄存器窗口中的小参数，不实现 ioctl ABI、大块 DMA 参数缓冲区或异步完成。
+
+## Character Device
+
+12.3 新增 `/dev/smartnicX` 控制入口。probe 成功后调用 `smartnic_chrdev_register()`：
+
+1. `alloc_chrdev_region()` 分配动态 major/minor；
+2. 初始化 `cdev` 和 file operations；
+3. 创建 `class` 与 `device_create()` 节点；
+4. remove 时先删除 device/cdev，再唤醒 poll waiters，并等待已打开 fd 的 `open_count` 归零。
+
+当前 file operations 的语义：
+
+| 操作 | 当前行为 |
+| --- | --- |
+| `open` | 检查设备没有 remove/quiesce/reset，设置 `file->private_data=sdev` 并增加 open 引用 |
+| `release` | 清除 private_data，减少 open 引用，最后一个 fd 唤醒 remove 等待 |
+| `unlocked_ioctl` | 只识别 `SMARTNIC_IOCTL_MBOX_EXEC`，其他命令返回 `-ENOTTY` |
+| `compat_ioctl` | 复用 native ioctl dispatch |
+| `mmap` | 只允许映射已批准的 optional doorbell/MMIO BAR 区间，校验 offset/size，并使用 noncached IO 映射 |
+| `poll` | 有事件时返回 `POLLIN|POLLRDNORM`，可提交命令时返回 `POLLOUT|POLLWRNORM`，teardown 时返回 `POLLERR|POLLHUP` |
+
+`SMARTNIC_IOCTL_MBOX_EXEC` 使用固定大小结构，包含 `struct_size`、opcode、输入/输出 dword 数组和 status。它是 12.3 的教学型最小 ABI；后续 12.4～12.8 会添加资源生命周期 ioctl，而不是把完整 verbs 语义塞进这个 mailbox passthrough。

@@ -5,8 +5,10 @@
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(CURDIR)
 
+ccflags-y += -I$(src)/../../include
+
 obj-m := smartnic.o
-smartnic-y := smartnic_pci.o smartnic_mbox.o
+smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o
 
 .PHONY: all modules syntax-check clean
 

@@ -6,6 +6,8 @@
 #ifndef _SMARTNIC_PCI_H
 #define _SMARTNIC_PCI_H
 
+#include <linux/atomic.h>
+#include <linux/cdev.h>
 #include <linux/io.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
@@ -38,11 +40,21 @@ struct smartnic_dev {
 	struct mutex mbox_lock;
 	spinlock_t irq_lock;
 	wait_queue_head_t admin_wq;
+	wait_queue_head_t event_wq;
+	wait_queue_head_t open_wq;
 
 	enum smartnic_dev_state state;
 	bool dma_64bit;
 	bool irq_initialized;
 	bool reset_active;
+	bool chrdev_registered;
+	atomic_t open_count;
+	atomic_t event_pending;
+
+	dev_t chrdev_devt;
+	struct cdev cdev;
+	struct device *chrdev_device;
+	int chrdev_index;
 
 	u32 version;
 	u32 features;
