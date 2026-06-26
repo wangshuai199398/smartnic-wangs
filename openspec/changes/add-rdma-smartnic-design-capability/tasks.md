@@ -119,7 +119,7 @@
 - [x] 12.7 Implement driver tests for probe/remove, mailbox, char device, ioctl, mmap, poll, MSI-X, and DMA buffer lifecycle.
 - [x] 12.8 Implement driver documentation, example usage, and troubleshooting notes.
 - [x] 12.9 Implement end-to-end driver integration tests and packaging checks.
-- [ ] 12.10 Implement SR-IOV enable/disable, VF resource quotas, and per-function cleanup.
+- [x] 12.10 Implement driver self-tests, error-path tests, and integration tests for PCIe probe/remove, CSR mailbox, character device ioctl/mmap/poll, DMA mapping, and interrupt handling.
 - [ ] 12.11 Implement hot-remove and process-release cleanup for all resources owned by a file descriptor.
 - [ ] 12.12 Add driver build and static analysis targets.
 

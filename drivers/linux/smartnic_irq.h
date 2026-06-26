@@ -8,6 +8,7 @@
 
 struct smartnic_dev;
 
+u32 smartnic_irq_filter_status(u32 status);
 int smartnic_irq_setup(struct smartnic_dev *sdev);
 void smartnic_irq_teardown(struct smartnic_dev *sdev);
 void smartnic_irq_disable(struct smartnic_dev *sdev);

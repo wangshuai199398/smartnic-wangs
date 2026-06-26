@@ -123,7 +123,7 @@ def main() -> None:
         ("mutex_lock(&sdev->mbox_lock)", "mailbox serialization"),
         ("readl_poll_timeout", "mailbox timeout polling"),
         ("-ETIMEDOUT", "timeout errno"),
-        ("smartnic_mbox_map_error", "device error mapping"),
+        ("smartnic_mbox_device_error_to_errno", "device error mapping"),
         ("SMARTNIC_MBOX_CTRL_CLEAR_STATUS", "stale status clear"),
         ("smartnic_mbox_write_args", "input arguments before doorbell"),
         ("SMARTNIC_MBOX_CTRL_GO", "mailbox doorbell/start bit"),

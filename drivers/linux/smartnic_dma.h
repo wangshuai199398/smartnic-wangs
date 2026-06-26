@@ -27,6 +27,7 @@ struct smartnic_dma_ring {
 	bool allocated;
 };
 
+int smartnic_dma_ring_validate_params(u32 depth, u32 desc_size, size_t *size);
 int smartnic_dma_ring_alloc(struct smartnic_dev *sdev,
 			    struct smartnic_dma_ring *ring,
 			    u32 depth, u32 desc_size);

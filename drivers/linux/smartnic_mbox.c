@@ -47,7 +47,7 @@ static int smartnic_mbox_check_ready(struct smartnic_dev *sdev)
 	return err;
 }
 
-static int smartnic_mbox_map_error(u32 dev_error)
+int smartnic_mbox_device_error_to_errno(u32 dev_error)
 {
 	switch (dev_error) {
 	case SMARTNIC_MBOX_ERR_NONE:
@@ -177,7 +177,7 @@ int smartnic_mbox_exec(struct smartnic_dev *sdev, u16 opcode,
 
 	if (control & SMARTNIC_MBOX_CTRL_ERROR) {
 		dev_error = smartnic_mbox_read(sdev, SMARTNIC_MBOX_ERROR);
-		err = smartnic_mbox_map_error(dev_error);
+		err = smartnic_mbox_device_error_to_errno(dev_error);
 		dev_err(sdev->dev,
 			"mailbox opcode=0x%04x failed dev_error=0x%08x errno=%d\n",
 			opcode, dev_error, err);

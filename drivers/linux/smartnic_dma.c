@@ -12,7 +12,7 @@
 #include "smartnic_dma.h"
 #include "smartnic_pci.h"
 
-static int smartnic_dma_ring_validate(u32 depth, u32 desc_size, size_t *size)
+int smartnic_dma_ring_validate_params(u32 depth, u32 desc_size, size_t *size)
 {
 	size_t bytes;
 
@@ -45,7 +45,7 @@ int smartnic_dma_ring_alloc(struct smartnic_dev *sdev,
 	if (!sdev || !ring)
 		return -EINVAL;
 
-	err = smartnic_dma_ring_validate(depth, desc_size, &size);
+	err = smartnic_dma_ring_validate_params(depth, desc_size, &size);
 	if (err)
 		return err;
 

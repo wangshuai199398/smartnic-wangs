@@ -26,6 +26,7 @@ modules:
 syntax-check:
 	@python3 tests/test_smartnic_pci_driver_static.py
 	@python3 tests/test_smartnic_driver_lifecycle_static.py
+	@python3 tests/test_smartnic_driver_error_paths_static.py
 
 clean:
 	@if [ -f "$(KDIR)/Makefile" ]; then \

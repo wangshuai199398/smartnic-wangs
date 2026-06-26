@@ -39,6 +39,11 @@ static const char *smartnic_irq_role(int vector)
 	}
 }
 
+u32 smartnic_irq_filter_status(u32 status)
+{
+	return status & SMARTNIC_INTR_ALL_EVENTS;
+}
+
 static irqreturn_t smartnic_irq_handler(int irq, void *data)
 {
 	struct smartnic_dev *sdev = data;
@@ -50,7 +55,7 @@ static irqreturn_t smartnic_irq_handler(int irq, void *data)
 		return IRQ_NONE;
 
 	status = smartnic_irq_read(sdev, SMARTNIC_INTR_STATUS);
-	handled = status & SMARTNIC_INTR_ALL_EVENTS;
+	handled = smartnic_irq_filter_status(status);
 	if (!handled)
 		return IRQ_NONE;
 

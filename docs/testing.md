@@ -19,7 +19,7 @@ make driver-integration-test
 
 | 范围 | 覆盖 |
 | --- | --- |
-| 驱动静态检查 | probe/remove 路径、mailbox 超时/错误映射、字符设备、ioctl、mmap、poll、MSI-X、DMA 队列生命周期 |
+| 驱动静态检查 | probe/remove 路径、probe failure unwind、mailbox 超时/错误映射、字符设备、ioctl、mmap、poll、MSI-X、DMA 队列生命周期和 fault-injection 钩子 |
 | 打包 | UAPI 头文件存在、没有重复的 UAPI 结构体定义、当 Linux 头文件存在时工具和示例程序可构建 |
 | 模块生命周期 | 当 `smartnic.ko` 存在且脚本以 root 运行时，重复 `insmod`/`rmmod` 循环 |
 | 硬件烟雾测试 | `/dev/smartnicX` 创建、特性查询、复位命令、队列创建/销毁、mmap、poll |
@@ -58,4 +58,4 @@ sudo rmmod smartnic
 
 ## KUnit
 
-`drivers/linux/smartnic_kunit.c` 包含用于常量和 UAPI 布局的可选 KUnit 烟雾测试。在支持 KUnit 的 Linux 内核树中以 `CONFIG_SMARTNIC_KUNIT=y` 构建即可。
+`drivers/linux/smartnic_kunit.c` 包含用于常量、UAPI 布局、mailbox errno、DMA 参数、poll 掩码和 IRQ 过滤的可选 KUnit 烟雾测试。在支持 KUnit 的 Linux 内核树中以 `CONFIG_SMARTNIC_KUNIT=y` 构建即可。

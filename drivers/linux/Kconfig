@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config SMARTNIC
+	tristate "Prototype RDMA SmartNIC driver"
+	depends on PCI
+	help
+	  Build the prototype RDMA SmartNIC PCIe control driver.
+
+config SMARTNIC_KUNIT
+	bool "SmartNIC driver KUnit self-tests"
+	depends on SMARTNIC && KUNIT
+	help
+	  Enable optional KUnit tests for SmartNIC driver helper logic,
+	  error-code mapping, DMA parameter validation, poll masks, IRQ
+	  status filtering, and test-only fault hook layout.

@@ -37,6 +37,20 @@ struct smartnic_irq_entry {
 	char name[32];
 };
 
+#ifdef CONFIG_SMARTNIC_KUNIT
+/*
+ * Optional test-only fault knobs used by KUnit/static tests to document
+ * expected error-path coverage. Production builds do not carry this state.
+ */
+struct smartnic_test_faults {
+	bool fail_bar_mapping;
+	bool fail_dma_mask_setup;
+	bool fail_mailbox_completion;
+	bool fail_chrdev_registration;
+	bool fail_msix_allocation;
+};
+#endif
+
 struct smartnic_dev {
 	struct pci_dev *pdev;
 	struct device *dev;

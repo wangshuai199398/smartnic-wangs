@@ -50,6 +50,23 @@ static int smartnic_chrdev_check_ready(struct smartnic_dev *sdev)
 	return err;
 }
 
+__poll_t smartnic_chrdev_poll_mask(enum smartnic_dev_state state,
+				   bool reset_active, bool event_pending)
+{
+	__poll_t mask = 0;
+
+	if (state == SMARTNIC_DEV_REMOVED || state == SMARTNIC_DEV_QUIESCING)
+		return POLLERR | POLLHUP;
+
+	if (event_pending)
+		mask |= POLLIN | POLLRDNORM;
+
+	if (!reset_active)
+		mask |= POLLOUT | POLLWRNORM;
+
+	return mask;
+}
+
 static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 {
 	struct smartnic_dev *sdev;
@@ -221,16 +238,8 @@ static __poll_t smartnic_chrdev_poll(struct file *filp, poll_table *wait)
 	reset_active = sdev->reset_active;
 	mutex_unlock(&sdev->state_lock);
 
-	if (state == SMARTNIC_DEV_REMOVED || state == SMARTNIC_DEV_QUIESCING)
-		return POLLERR | POLLHUP;
-
-	if (atomic_read(&sdev->event_pending))
-		mask |= POLLIN | POLLRDNORM;
-
-	if (!reset_active)
-		mask |= POLLOUT | POLLWRNORM;
-
-	return mask;
+	return smartnic_chrdev_poll_mask(state, reset_active,
+					 atomic_read(&sdev->event_pending));
 }
 
 static const struct file_operations smartnic_fops = {
