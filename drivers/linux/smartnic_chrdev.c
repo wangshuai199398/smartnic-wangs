@@ -27,6 +27,7 @@
 #include "smartnic_chrdev.h"
 #include "smartnic_mbox.h"
 #include "smartnic_pci.h"
+#include "smartnic_queue.h"
 #include "smartnic_regs.h"
 
 static DEFINE_MUTEX(smartnic_class_lock);
@@ -52,6 +53,7 @@ static int smartnic_chrdev_check_ready(struct smartnic_dev *sdev)
 static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 {
 	struct smartnic_dev *sdev;
+	struct smartnic_file *ctx;
 	int err;
 
 	sdev = container_of(inode->i_cdev, struct smartnic_dev, cdev);
@@ -59,8 +61,12 @@ static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 	if (err)
 		return err;
 
+	ctx = smartnic_file_create(sdev);
+	if (!ctx)
+		return -ENOMEM;
+
 	atomic_inc(&sdev->open_count);
-	filp->private_data = sdev;
+	filp->private_data = ctx;
 	dev_dbg(sdev->dev, "character device opened, open_count=%d\n",
 		atomic_read(&sdev->open_count));
 	return 0;
@@ -68,12 +74,15 @@ static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 
 static int smartnic_chrdev_release(struct inode *inode, struct file *filp)
 {
-	struct smartnic_dev *sdev = filp->private_data;
+	struct smartnic_file *ctx = filp->private_data;
+	struct smartnic_dev *sdev;
 
-	if (!sdev)
+	if (!ctx)
 		return 0;
 
+	sdev = ctx->sdev;
 	filp->private_data = NULL;
+	smartnic_file_destroy(ctx);
 	if (atomic_dec_and_test(&sdev->open_count))
 		wake_up_all(&sdev->open_wq);
 
@@ -113,12 +122,14 @@ static long smartnic_ioctl_mbox_exec(struct smartnic_dev *sdev,
 static long smartnic_chrdev_ioctl(struct file *filp, unsigned int cmd,
 				  unsigned long arg)
 {
-	struct smartnic_dev *sdev = filp->private_data;
+	struct smartnic_file *ctx = filp->private_data;
+	struct smartnic_dev *sdev;
 	int err;
 
-	if (!sdev)
+	if (!ctx)
 		return -ENODEV;
 
+	sdev = ctx->sdev;
 	err = smartnic_chrdev_check_ready(sdev);
 	if (err)
 		return err;
@@ -129,6 +140,10 @@ static long smartnic_chrdev_ioctl(struct file *filp, unsigned int cmd,
 	switch (cmd) {
 	case SMARTNIC_IOCTL_MBOX_EXEC:
 		return smartnic_ioctl_mbox_exec(sdev, arg);
+	case SMARTNIC_IOCTL_QUEUE_CREATE:
+	case SMARTNIC_IOCTL_QUEUE_DESTROY:
+	case SMARTNIC_IOCTL_QUEUE_QUERY:
+		return smartnic_queue_ioctl(ctx, cmd, arg);
 	default:
 		dev_dbg(sdev->dev, "unknown ioctl cmd=0x%x\n", cmd);
 		return -ENOTTY;
@@ -145,18 +160,23 @@ static long smartnic_chrdev_compat_ioctl(struct file *filp, unsigned int cmd,
 
 static int smartnic_chrdev_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	struct smartnic_dev *sdev = filp->private_data;
+	struct smartnic_file *ctx = filp->private_data;
+	struct smartnic_dev *sdev;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	resource_size_t offset;
 	resource_size_t pfn;
 	int err;
 
-	if (!sdev)
+	if (!ctx)
 		return -ENODEV;
 
+	sdev = ctx->sdev;
 	err = smartnic_chrdev_check_ready(sdev);
 	if (err)
 		return err;
+
+	if (((u64)vma->vm_pgoff << PAGE_SHIFT) >= SMARTNIC_QUEUE_MMAP_BASE)
+		return smartnic_queue_mmap(ctx, vma);
 
 	if (!sdev->doorbell_bar.addr || !sdev->doorbell_bar.len)
 		return -EPERM;
@@ -184,14 +204,16 @@ static int smartnic_chrdev_mmap(struct file *filp, struct vm_area_struct *vma)
 
 static __poll_t smartnic_chrdev_poll(struct file *filp, poll_table *wait)
 {
-	struct smartnic_dev *sdev = filp->private_data;
+	struct smartnic_file *ctx = filp->private_data;
+	struct smartnic_dev *sdev;
 	__poll_t mask = 0;
 	enum smartnic_dev_state state;
 	bool reset_active;
 
-	if (!sdev)
+	if (!ctx)
 		return POLLERR | POLLHUP;
 
+	sdev = ctx->sdev;
 	poll_wait(filp, &sdev->event_wq, wait);
 
 	mutex_lock(&sdev->state_lock);

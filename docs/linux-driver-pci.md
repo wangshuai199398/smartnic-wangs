@@ -14,6 +14,10 @@
 | `drivers/linux/smartnic_chrdev.h` | 字符设备注册/注销接口 |
 | `drivers/linux/smartnic_irq.c` | MSI-X 分配、ISR、状态 ACK、poll/event 唤醒和 teardown |
 | `drivers/linux/smartnic_irq.h` | interrupt setup/teardown helper 接口 |
+| `drivers/linux/smartnic_dma.c` | coherent DMA ring 分配、参数校验和释放 |
+| `drivers/linux/smartnic_dma.h` | DMA ring 描述结构和 helper API |
+| `drivers/linux/smartnic_queue.c` | per-file SQ/RQ/CQ/descriptor queue create/query/destroy 和 mmap |
+| `drivers/linux/smartnic_queue.h` | file context、queue context 和 queue API |
 | `drivers/linux/smartnic_regs.h` | PCI vendor/device ID、BAR 编号和早期 CSR offset 宏 |
 | `include/uapi/linux/smartnic_ioctl.h` | 用户态可见的最小 ioctl ABI |
 | `drivers/linux/tests/test_smartnic_pci_driver_static.py` | compile-only 前的静态结构检查 |
@@ -131,3 +135,21 @@ ISR 的最小行为：
 - 使用 `wake_up_interruptible()` 唤醒 `poll()` 等待者。
 
 remove 时先让 char device 进入 teardown，然后 `smartnic_irq_teardown()` 会关闭硬件中断、`synchronize_irq()`、`free_irq()` 并释放 MSI-X vectors。真实 CQ event queue、CQ vector routing 和 per-CQ moderation 仍留给后续资源/中断任务扩展。
+
+## DMA Ring And Queue Buffers
+
+12.6 新增 coherent DMA ring 管理，供 SQ/RQ/CQ 和 descriptor/control ring 使用。`smartnic_dma_ring_alloc()` 校验：
+
+- depth 不能为 0，且必须是 power-of-two；
+- descriptor size 不能为 0，且按 8 字节对齐；
+- `depth * desc_size` 不能 overflow；
+- 单个 ring 不能超过 `SMARTNIC_DMA_RING_MAX_BYTES`。
+
+`smartnic_queue.c` 在每个打开的 fd 上创建 `smartnic_file` context。通过 `SMARTNIC_IOCTL_QUEUE_CREATE` 可以创建一个 ring，返回：
+
+- `queue_id`：只在当前 fd 内有效；
+- `mmap_offset`：用户态传给 `mmap()` 的 offset cookie；
+- `ring_size`：可映射大小；
+- `dma_addr`：设备 DMA 地址，方便后续 mailbox/context programming。
+
+`SMARTNIC_IOCTL_QUEUE_DESTROY` 释放单个 queue。`release()` 会自动释放该 fd 拥有的所有 queue，因此进程退出或 fd close 不会泄漏 coherent DMA buffer。`mmap()` 仅接受当前 fd 拥有的 queue offset，使用 `dma_mmap_coherent()` 映射，不暴露 kernel virtual address。

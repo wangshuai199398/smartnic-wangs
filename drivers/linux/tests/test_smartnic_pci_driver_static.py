@@ -25,6 +25,10 @@ def main() -> None:
     chrdev_h = read(ROOT / "smartnic_chrdev.h")
     irq_c = read(ROOT / "smartnic_irq.c")
     irq_h = read(ROOT / "smartnic_irq.h")
+    dma_c = read(ROOT / "smartnic_dma.c")
+    dma_h = read(ROOT / "smartnic_dma.h")
+    queue_c = read(ROOT / "smartnic_queue.c")
+    queue_h = read(ROOT / "smartnic_queue.h")
     regs_h = read(ROOT / "smartnic_regs.h")
     makefile = read(ROOT / "Makefile")
     ioctl_h = read(REPO / "include/uapi/linux/smartnic_ioctl.h")
@@ -111,7 +115,7 @@ def main() -> None:
 
     require(makefile, "obj-m := smartnic.o", "Kbuild module object")
     require(makefile, "ccflags-y += -I$(src)/../../include", "UAPI include path")
-    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o", "driver object list")
+    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o smartnic_dma.o smartnic_queue.o", "driver object list")
     require(tasks, "- [x] 12.1 Implement PCIe driver probe/remove", "12.1 task completion")
 
     for needle, label in [
@@ -142,6 +146,11 @@ def main() -> None:
         ("#define SMARTNIC_IOCTL_MAGIC", "ioctl magic"),
         ("struct smartnic_ioctl_mbox", "mailbox ioctl struct"),
         ("SMARTNIC_IOCTL_MBOX_EXEC", "mailbox ioctl command"),
+        ("SMARTNIC_IOCTL_QUEUE_CREATE", "queue create ioctl command"),
+        ("SMARTNIC_IOCTL_QUEUE_DESTROY", "queue destroy ioctl command"),
+        ("SMARTNIC_IOCTL_QUEUE_QUERY", "queue query ioctl command"),
+        ("struct smartnic_ioctl_queue", "queue ioctl struct"),
+        ("SMARTNIC_QUEUE_MMAP_OFFSET", "queue mmap offset helper"),
         ("_IOWR", "read/write ioctl encoding"),
     ]:
         require(ioctl_h, needle, label)
@@ -162,6 +171,10 @@ def main() -> None:
         ("copy_to_user", "safe user output copy"),
         ("-ENOTTY", "unknown ioctl error"),
         ("smartnic_mbox_exec", "mailbox dispatch"),
+        ("smartnic_file_create", "per-file context allocation"),
+        ("smartnic_file_destroy", "per-file queue cleanup"),
+        ("smartnic_queue_ioctl", "queue ioctl dispatch"),
+        ("smartnic_queue_mmap", "queue mmap dispatch"),
         ("io_remap_pfn_range", "IO mmap remap"),
         ("pgprot_noncached", "noncached mmap protection"),
         ("poll_wait", "poll wait queue"),
@@ -220,6 +233,55 @@ def main() -> None:
         require(irq_h, needle, label)
 
     require(tasks, "- [x] 12.5 Implement driver interrupt support", "12.5 task completion")
+
+    for needle, label in [
+        ("struct smartnic_dma_ring", "DMA ring struct"),
+        ("cpu_addr", "CPU virtual address field"),
+        ("dma_addr_t dma_addr", "DMA address field"),
+        ("producer_index", "producer index"),
+        ("consumer_index", "consumer index"),
+        ("smartnic_dma_ring_alloc", "DMA ring alloc declaration"),
+        ("smartnic_dma_ring_free", "DMA ring free declaration"),
+    ]:
+        require(dma_h, needle, label)
+
+    for needle, label in [
+        ("dma_alloc_coherent", "coherent DMA allocation"),
+        ("dma_free_coherent", "coherent DMA free"),
+        ("is_power_of_2", "power-of-two depth validation"),
+        ("SMARTNIC_DMA_DESC_ALIGN", "descriptor alignment validation"),
+        ("check_mul_overflow", "allocation overflow validation"),
+        ("SMARTNIC_DMA_RING_MAX_BYTES", "oversized allocation rejection"),
+    ]:
+        require(dma_c, needle, label)
+
+    for needle, label in [
+        ("struct smartnic_file", "per-file context"),
+        ("struct smartnic_queue", "queue struct"),
+        ("struct smartnic_dma_ring ring", "queue ring storage"),
+        ("smartnic_file_create", "file context create declaration"),
+        ("smartnic_file_destroy", "file context destroy declaration"),
+        ("smartnic_queue_ioctl", "queue ioctl declaration"),
+        ("smartnic_queue_mmap", "queue mmap declaration"),
+    ]:
+        require(queue_h, needle, label)
+
+    for needle, label in [
+        ("smartnic_dma_ring_alloc", "queue create allocates ring"),
+        ("smartnic_dma_ring_free", "queue destroy frees ring"),
+        ("SMARTNIC_IOCTL_QUEUE_CREATE", "queue create ioctl"),
+        ("SMARTNIC_IOCTL_QUEUE_DESTROY", "queue destroy ioctl"),
+        ("SMARTNIC_IOCTL_QUEUE_QUERY", "queue query ioctl"),
+        ("copy_from_user", "queue ioctl copies user input"),
+        ("copy_to_user", "queue ioctl copies user output"),
+        ("dma_mmap_coherent", "queue coherent mmap"),
+        ("SMARTNIC_QUEUE_MMAP_OFFSET", "queue mmap cookie"),
+        ("list_for_each_entry_safe", "release frees all queues"),
+        ("smartnic_queue_type_valid", "queue type validation"),
+    ]:
+        require(queue_c, needle, label)
+
+    require(tasks, "- [x] 12.6 Implement driver DMA buffer management", "12.6 task completion")
 
     print("smartnic PCI driver static checks passed")
 

@@ -21,6 +21,8 @@
 - `smartnic_mbox.c` / `smartnic_mbox.h`：CSR mailbox 同步命令 helper、timeout 和错误码映射；
 - `smartnic_chrdev.c` / `smartnic_chrdev.h`：`/dev/smartnicX` open/release/ioctl/mmap/poll 控制入口；
 - `smartnic_irq.c` / `smartnic_irq.h`：MSI-X vector 分配、ISR、事件标记和 teardown；
+- `smartnic_dma.c` / `smartnic_dma.h`：coherent DMA ring 分配和释放；
+- `smartnic_queue.c` / `smartnic_queue.h`：per-file SQ/RQ/CQ/descriptor queue 生命周期和 mmap；
 - `smartnic_regs.h`：PCI ID、BAR 和早期 CSR offset 宏。
 
 后续阶段会继续补充 CSR mailbox、字符设备、mmap、资源管理、MSI-X 和 SR-IOV。

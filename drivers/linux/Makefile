@@ -1,6 +1,6 @@
 # Linux driver 构建入口。
 # 如果本机有 Linux kernel headers，则构建 out-of-tree module；
-# 否则运行静态检查并跳过真实 Kbuild，方便 macOS/教学环境继续验证结构。
+# 否则运行静态检查并跳过真实 Kbuild，方便缺少 kernel headers 的环境继续验证结构。
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(CURDIR)
@@ -8,7 +8,7 @@ PWD := $(CURDIR)
 ccflags-y += -I$(src)/../../include
 
 obj-m := smartnic.o
-smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o
+smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o smartnic_dma.o smartnic_queue.o
 
 .PHONY: all modules syntax-check clean
 
