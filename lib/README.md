@@ -13,9 +13,9 @@
 - mmap Doorbell 写入辅助函数
 - 与 libibverbs 风格接口的兼容层
 
-当前 13.1～13.5 已实现 provider-facing 的基础层：
+当前 13.1～13.6 已实现 provider-facing 的基础层：
 
 - `lib/libsmartnic/smartnic_provider.h`
 - `lib/libsmartnic/smartnic_provider.c`
 
-这些 API 负责发现 `/dev/smartnic*`、打开驱动 fd、缓存基础 ABI/能力信息、查询设备/端口/GID/P_Key，并通过 mailbox 命令分配/释放 PD、创建/销毁/resize/轮询/arm CQ、创建/修改/查询/销毁 QP。MR/AH、WQE 构建和 fast path verbs 仍留给后续 13.x 任务。
+这些 API 负责发现 `/dev/smartnic*`、打开驱动 fd、缓存基础 ABI/能力信息、查询设备/端口/GID/P_Key，并通过 mailbox 命令分配/释放 PD、创建/销毁/resize/轮询/arm CQ、创建/修改/查询/销毁 QP、注册/注销 MR。AH、WQE 构建和 fast path verbs 仍留给后续 13.x 任务。

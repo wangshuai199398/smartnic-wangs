@@ -46,10 +46,13 @@ extern "C" {
 #define SMARTNIC_CMD_MODIFY_QP    0x0302
 #define SMARTNIC_CMD_QUERY_QP     0x0303
 #define SMARTNIC_CMD_DESTROY_QP   0x0304
+#define SMARTNIC_CMD_REG_MR       0x0401
+#define SMARTNIC_CMD_DEREG_MR     0x0402
 
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_PD 0x534e5044U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ 0x534e4345U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_QP 0x534e5150U
+#define SMARTNIC_PROVIDER_OBJECT_MAGIC_MR 0x534e4d52U
 
 #define SMARTNIC_PROVIDER_WC_FLAG_IMM 0x00000001U
 
@@ -84,6 +87,18 @@ extern "C" {
 #define SMARTNIC_PROVIDER_QP_REQUIRED_RTS \
 	(SMARTNIC_PROVIDER_QP_ATTR_STATE | SMARTNIC_PROVIDER_QP_ATTR_SQ_PSN | \
 	 SMARTNIC_PROVIDER_QP_ATTR_RETRY | SMARTNIC_PROVIDER_QP_ATTR_TIMEOUT)
+
+#define SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE    0x00000001U
+#define SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE   0x00000002U
+#define SMARTNIC_PROVIDER_ACCESS_REMOTE_READ    0x00000004U
+#define SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC  0x00000008U
+#define SMARTNIC_PROVIDER_ACCESS_RELAXED_ORDER  0x00000010U
+#define SMARTNIC_PROVIDER_ACCESS_SUPPORTED_MASK \
+	(SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE | \
+	 SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE | \
+	 SMARTNIC_PROVIDER_ACCESS_REMOTE_READ | \
+	 SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC | \
+	 SMARTNIC_PROVIDER_ACCESS_RELAXED_ORDER)
 
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
@@ -220,6 +235,7 @@ struct smartnic_provider_context {
 	struct smartnic_provider_pd *pd_list;
 	struct smartnic_provider_cq *cq_list;
 	struct smartnic_provider_qp *qp_list;
+	struct smartnic_provider_mr *mr_list;
 	int closed;
 };
 
@@ -277,6 +293,23 @@ struct smartnic_provider_qp {
 	struct smartnic_provider_qp *next;
 };
 
+struct smartnic_provider_mr {
+	uint32_t magic;
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_pd *pd;
+	void *addr;
+	uint64_t length;
+	uint32_t access_flags;
+	uint32_t kernel_handle;
+	uint32_t lkey;
+	uint32_t rkey;
+	uint32_t page_size;
+	uint8_t page_shift;
+	unsigned int active_ops;
+	unsigned int refcount;
+	struct smartnic_provider_mr *next;
+};
+
 int smartnic_provider_discover(struct smartnic_provider_device **devices,
 			       size_t *count);
 void smartnic_provider_free_devices(struct smartnic_provider_device *devices);
@@ -322,6 +355,11 @@ int smartnic_provider_query_qp(struct smartnic_provider_qp *qp,
 			       struct smartnic_provider_qp_attr *attr,
 			       struct smartnic_provider_qp_init_attr *init_attr);
 int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp);
+
+int smartnic_provider_reg_mr(struct smartnic_provider_pd *pd, void *addr,
+			     uint64_t length, uint32_t access_flags,
+			     struct smartnic_provider_mr **mr);
+int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr);
 
 const char *smartnic_provider_strerror(int err);
 

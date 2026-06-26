@@ -37,6 +37,8 @@ def main() -> None:
         "SMARTNIC_CMD_MODIFY_QP",
         "SMARTNIC_CMD_QUERY_QP",
         "SMARTNIC_CMD_DESTROY_QP",
+        "SMARTNIC_CMD_REG_MR",
+        "SMARTNIC_CMD_DEREG_MR",
         "struct smartnic_provider_device",
         "struct smartnic_provider_context",
         "struct smartnic_provider_device_attr",
@@ -48,6 +50,7 @@ def main() -> None:
         "struct smartnic_provider_pd",
         "struct smartnic_provider_cq",
         "struct smartnic_provider_qp",
+        "struct smartnic_provider_mr",
         "smartnic_provider_discover",
         "smartnic_provider_free_devices",
         "smartnic_provider_open",
@@ -68,6 +71,8 @@ def main() -> None:
         "smartnic_provider_modify_qp",
         "smartnic_provider_query_qp",
         "smartnic_provider_destroy_qp",
+        "smartnic_provider_reg_mr",
+        "smartnic_provider_dereg_mr",
         "SMARTNIC_PROVIDER_TRANSPORT_RC",
         "SMARTNIC_PROVIDER_TRANSPORT_UD",
         "SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET",
@@ -76,6 +81,13 @@ def main() -> None:
         "SMARTNIC_PROVIDER_OBJECT_MAGIC_PD",
         "SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ",
         "SMARTNIC_PROVIDER_OBJECT_MAGIC_QP",
+        "SMARTNIC_PROVIDER_OBJECT_MAGIC_MR",
+        "SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE",
+        "SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE",
+        "SMARTNIC_PROVIDER_ACCESS_REMOTE_READ",
+        "SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC",
+        "SMARTNIC_PROVIDER_ACCESS_RELAXED_ORDER",
+        "SMARTNIC_PROVIDER_ACCESS_SUPPORTED_MASK",
         "SMARTNIC_PROVIDER_QPT_RC",
         "SMARTNIC_PROVIDER_QPS_RESET",
         "SMARTNIC_PROVIDER_QPS_INIT",
@@ -93,6 +105,7 @@ def main() -> None:
         "pd_list",
         "cq_list",
         "qp_list",
+        "mr_list",
         "producer_index",
         "consumer_index",
         "armed",
@@ -123,6 +136,8 @@ def main() -> None:
         "SMARTNIC_CMD_CREATE_QP",
         "SMARTNIC_CMD_MODIFY_QP",
         "SMARTNIC_CMD_DESTROY_QP",
+        "SMARTNIC_CMD_REG_MR",
+        "SMARTNIC_CMD_DEREG_MR",
         "smartnic_provider_mailbox_exec",
         "O_RDWR | O_CLOEXEC",
         "pthread_mutex_init",
@@ -182,6 +197,20 @@ def main() -> None:
         "SMARTNIC_PROVIDER_QPS_RTS",
         "qp->active_ops != 0",
         "qp->refcount > 1",
+        "smartnic_provider_page_shift",
+        "smartnic_provider_validate_mr_access",
+        "smartnic_provider_mr_alloc_object",
+        "smartnic_provider_mr_link_locked",
+        "smartnic_provider_mr_unlink_locked",
+        "smartnic_provider_mr_is_linked_locked",
+        "smartnic_provider_mr_hold_pd_locked",
+        "smartnic_provider_mr_put_pd_locked",
+        "SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE",
+        "SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC",
+        "length > UINT32_MAX",
+        "out[0] == 0 || out[1] == 0 || out[2] == 0",
+        "mr->active_ops != 0",
+        "mr->refcount > 1",
     ]:
         require(source, needle, f"provider source {needle}")
 
@@ -198,6 +227,7 @@ def main() -> None:
     require(tasks, "- [x] 13.3 Implement PD alloc/dealloc", "13.3 task completion")
     require(tasks, "- [x] 13.4 Implement CQ create/destroy/resize", "13.4 task completion")
     require(tasks, "- [x] 13.5 Implement QP create/modify/query/destroy", "13.5 task completion")
+    require(tasks, "- [x] 13.6 Implement MR register/deregister", "13.6 task completion")
     print("smartnic provider static checks passed")
 
 

@@ -525,6 +525,120 @@ static void smartnic_provider_qp_put_refs_locked(struct smartnic_provider_qp *qp
 		qp->recv_cq->refcount--;
 }
 
+static uint8_t smartnic_provider_page_shift(uint32_t page_size)
+{
+	uint8_t shift = 0;
+
+	while ((1U << shift) < page_size && shift < 31)
+		shift++;
+
+	return shift;
+}
+
+static int smartnic_provider_validate_mr_access(uint32_t access_flags)
+{
+	if (access_flags & ~SMARTNIC_PROVIDER_ACCESS_SUPPORTED_MASK) {
+		errno = EOPNOTSUPP;
+		return -1;
+	}
+
+	if ((access_flags & SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE) &&
+	    !(access_flags & SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if ((access_flags & SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC) &&
+	    !(access_flags & SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE)) {
+		errno = EOPNOTSUPP;
+		return -1;
+	}
+
+	return 0;
+}
+
+static struct smartnic_provider_mr *
+smartnic_provider_mr_alloc_object(struct smartnic_provider_context *ctx,
+				  struct smartnic_provider_pd *pd, void *addr,
+				  uint64_t length, uint32_t access_flags,
+				  const uint32_t out[3])
+{
+	struct smartnic_provider_mr *mr;
+
+	mr = calloc(1, sizeof(*mr));
+	if (!mr)
+		return NULL;
+
+	mr->magic = SMARTNIC_PROVIDER_OBJECT_MAGIC_MR;
+	mr->ctx = ctx;
+	mr->pd = pd;
+	mr->addr = addr;
+	mr->length = length;
+	mr->access_flags = access_flags;
+	mr->kernel_handle = out[0];
+	mr->lkey = out[1];
+	mr->rkey = out[2];
+	mr->page_size = 4096U;
+	mr->page_shift = smartnic_provider_page_shift(mr->page_size);
+	mr->refcount = 1;
+	return mr;
+}
+
+static void smartnic_provider_mr_link_locked(struct smartnic_provider_context *ctx,
+					     struct smartnic_provider_mr *mr)
+{
+	mr->next = ctx->mr_list;
+	ctx->mr_list = mr;
+	ctx->mr_count++;
+}
+
+static int smartnic_provider_mr_unlink_locked(struct smartnic_provider_context *ctx,
+					      struct smartnic_provider_mr *mr)
+{
+	struct smartnic_provider_mr **cursor = &ctx->mr_list;
+
+	while (*cursor) {
+		if (*cursor == mr) {
+			*cursor = mr->next;
+			mr->next = NULL;
+			if (ctx->mr_count)
+				ctx->mr_count--;
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int smartnic_provider_mr_is_linked_locked(struct smartnic_provider_context *ctx,
+						 const struct smartnic_provider_mr *mr)
+{
+	const struct smartnic_provider_mr *cursor;
+
+	for (cursor = ctx->mr_list; cursor; cursor = cursor->next) {
+		if (cursor == mr)
+			return 1;
+	}
+
+	return 0;
+}
+
+static void smartnic_provider_mr_hold_pd_locked(struct smartnic_provider_mr *mr)
+{
+	mr->pd->child_count++;
+	mr->pd->refcount++;
+}
+
+static void smartnic_provider_mr_put_pd_locked(struct smartnic_provider_mr *mr)
+{
+	if (mr->pd->child_count)
+		mr->pd->child_count--;
+	if (mr->pd->refcount)
+		mr->pd->refcount--;
+}
+
 static int smartnic_provider_validate_node(const char *path,
 					   struct smartnic_provider_device *dev)
 {
@@ -1561,6 +1675,150 @@ int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp)
 	pthread_mutex_unlock(&ctx->lock);
 
 	smartnic_provider_qp_free_object(qp);
+	return 0;
+}
+
+int smartnic_provider_reg_mr(struct smartnic_provider_pd *pd, void *addr,
+			     uint64_t length, uint32_t access_flags,
+			     struct smartnic_provider_mr **mr)
+{
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_mr *new_mr;
+	uintptr_t va;
+	uint32_t in[4];
+	uint32_t out[3] = { 0 };
+
+	if (!mr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*mr = NULL;
+	if (!pd || pd->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_PD || !pd->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!addr || length == 0 || length > UINT32_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_validate_mr_access(access_flags) < 0)
+		return -1;
+
+	ctx = pd->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_pd_is_linked_locked(ctx, pd)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (ctx->mr_count >= SMARTNIC_PROVIDER_DEFAULT_MAX_MR) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = ENOSPC;
+		return -1;
+	}
+
+	va = (uintptr_t)addr;
+	in[0] = (uint32_t)(va & 0xffffffffU);
+	in[1] = (uint32_t)((uint64_t)va >> 32);
+	in[2] = (uint32_t)length;
+	in[3] = access_flags;
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_REG_MR,
+					   in, 4, out, 3) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (out[0] == 0 || out[1] == 0 || out[2] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EIO;
+		return -1;
+	}
+
+	new_mr = smartnic_provider_mr_alloc_object(ctx, pd, addr, length,
+						   access_flags, out);
+	if (!new_mr) {
+		uint32_t dereg_in[1] = { out[0] };
+		int saved_errno = errno;
+
+		(void)smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DEREG_MR,
+						     dereg_in, 1, NULL, 0);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = saved_errno;
+		return -1;
+	}
+
+	smartnic_provider_mr_hold_pd_locked(new_mr);
+	smartnic_provider_mr_link_locked(ctx, new_mr);
+	pthread_mutex_unlock(&ctx->lock);
+
+	*mr = new_mr;
+	return 0;
+}
+
+int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[1];
+
+	if (!mr || mr->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_MR || !mr->ctx ||
+	    !mr->pd) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = mr->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_mr_is_linked_locked(ctx, mr)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (mr->active_ops != 0 || mr->refcount > 1) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBUSY;
+		return -1;
+	}
+
+	in[0] = mr->kernel_handle;
+	if (in[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DEREG_MR,
+					   in, 1, NULL, 0) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (smartnic_provider_mr_unlink_locked(ctx, mr) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	smartnic_provider_mr_put_pd_locked(mr);
+	mr->magic = 0;
+	mr->ctx = NULL;
+	mr->pd = NULL;
+	mr->kernel_handle = 0;
+	pthread_mutex_unlock(&ctx->lock);
+
+	free(mr);
 	return 0;
 }
 

@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。
 
 ## 已实现的 API
 
@@ -45,6 +45,10 @@ int smartnic_provider_query_qp(struct smartnic_provider_qp *qp,
                                struct smartnic_provider_qp_attr *attr,
                                struct smartnic_provider_qp_init_attr *init_attr);
 int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp);
+int smartnic_provider_reg_mr(struct smartnic_provider_pd *pd, void *addr,
+                             uint64_t length, uint32_t access_flags,
+                             struct smartnic_provider_mr **mr);
+int smartnic_provider_dereg_mr(struct smartnic_provider_mr *mr);
 ```
 
 ## 设备发现
@@ -166,10 +170,38 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 
 `smartnic_provider_query_qp()` 返回 provider cached QP attrs 和 init attrs。`smartnic_provider_destroy_qp()` 会拒绝仍有 active operations 或额外引用的 QP，成功销毁 kernel QP 后释放 PD/CQ child 引用，并从 context QP 链表摘除。
 
-## 13.5 后仍未实现的内容
+## MR 生命周期
+
+`smartnic_provider_reg_mr()` 需要一个有效 PD、非空用户虚拟地址、非零长度和受支持的 access flags。当前支持的 provider access flags 包括：
+
+| flag | 用途 |
+| --- | --- |
+| `SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE` | 允许本地写入 buffer，例如 Recv 或 RDMA Read response |
+| `SMARTNIC_PROVIDER_ACCESS_REMOTE_WRITE` | 允许远端 RDMA Write |
+| `SMARTNIC_PROVIDER_ACCESS_REMOTE_READ` | 允许远端 RDMA Read |
+| `SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC` | 预留远端 atomic 权限 |
+| `SMARTNIC_PROVIDER_ACCESS_RELAXED_ORDER` | 预留 relaxed ordering |
+
+为了避免授予不可执行的权限，当前规则会拒绝未知 bit；`REMOTE_WRITE` 必须同时带 `LOCAL_WRITE`；`REMOTE_ATOMIC` 当前返回不支持，直到硬件/驱动侧 atomic 能力真正接入。
+
+注册成功后，provider 保存：
+
+- parent context 和 PD；
+- 用户虚拟地址和长度；
+- access flags；
+- kernel MR handle；
+- lkey 和 rkey；
+- page size / page shift；
+- active operation/refcount；
+- context MR 链表指针。
+
+当前原型复用 `SMARTNIC_IOCTL_MBOX_EXEC`。由于 mailbox 参数区只有 4 个 dword，13.6 传给 kernel 的注册参数为 VA low、VA high、length low32 和 access flags，因此 provider 暂时拒绝超过 4GB 的单个 MR。后续如果驱动暴露 dedicated MR ioctl 或扩展 mailbox payload，可以自然放宽该限制并传递完整 pinned SG list 元数据。
+
+`smartnic_provider_dereg_mr()` 会验证 MR magic、parent context 和链表归属，拒绝仍有 active operations 或额外 refcount 的 MR。注销成功后发送 `SMARTNIC_CMD_DEREG_MR`，释放 PD child/refcount，并从 context MR 链表摘除。重复注销或伪造 MR 会返回 `EINVAL`。
+
+## 13.6 后仍未实现的内容
 
 - QP send/recv posting；
-- MR 注册；
 - AH 管理；
 - 快速路径 Doorbell 写入；
 - libibverbs provider 注册。

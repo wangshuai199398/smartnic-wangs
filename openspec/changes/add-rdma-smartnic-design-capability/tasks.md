@@ -130,7 +130,7 @@
 - [x] 13.3 Implement PD alloc/dealloc APIs.
 - [x] 13.4 Implement CQ create/destroy/resize, poll_cq, and req_notify_cq APIs.
 - [x] 13.5 Implement QP create/modify/query/destroy APIs.
-- [ ] 13.6 Implement MR register/deregister APIs.
+- [x] 13.6 Implement MR register/deregister APIs.
 - [ ] 13.7 Implement AH create/destroy APIs for UD.
 - [ ] 13.8 Implement WQE builders for Send, Send with Immediate, RDMA Write, RDMA Write with Immediate, RDMA Read, and supported UD operations.
 - [ ] 13.9 Implement post_send and post_recv batching with Doorbell memory barriers.
