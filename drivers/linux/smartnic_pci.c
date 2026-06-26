@@ -125,6 +125,10 @@ static void smartnic_hw_reset(struct smartnic_dev *sdev)
 		return;
 
 	dev_dbg(sdev->dev, "requesting device reset\n");
+	mutex_lock(&sdev->state_lock);
+	sdev->reset_active = true;
+	mutex_unlock(&sdev->state_lock);
+
 	smartnic_csr_write(sdev, SMARTNIC_CSR_RESET, SMARTNIC_RESET_REQUEST);
 
 	do {
@@ -134,10 +138,16 @@ static void smartnic_hw_reset(struct smartnic_dev *sdev)
 		status = smartnic_csr_read(sdev, SMARTNIC_CSR_RESET);
 		if (status & SMARTNIC_RESET_DONE) {
 			dev_dbg(sdev->dev, "device reset completed\n");
+			mutex_lock(&sdev->state_lock);
+			sdev->reset_active = false;
+			mutex_unlock(&sdev->state_lock);
 			return;
 		}
 	} while (waited_us < SMARTNIC_RESET_TIMEOUT_US);
 
+	mutex_lock(&sdev->state_lock);
+	sdev->reset_active = false;
+	mutex_unlock(&sdev->state_lock);
 	dev_dbg(sdev->dev, "reset done bit not observed before timeout\n");
 }
 
@@ -190,6 +200,7 @@ static int smartnic_pci_probe(struct pci_dev *pdev,
 	sdev->dev = &pdev->dev;
 	sdev->state = SMARTNIC_DEV_PROBING;
 	mutex_init(&sdev->state_lock);
+	mutex_init(&sdev->mbox_lock);
 	spin_lock_init(&sdev->irq_lock);
 	init_waitqueue_head(&sdev->admin_wq);
 	pci_set_drvdata(pdev, sdev);

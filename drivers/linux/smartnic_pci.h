@@ -35,12 +35,14 @@ struct smartnic_dev {
 	struct smartnic_bar doorbell_bar;
 
 	struct mutex state_lock;
+	struct mutex mbox_lock;
 	spinlock_t irq_lock;
 	wait_queue_head_t admin_wq;
 
 	enum smartnic_dev_state state;
 	bool dma_64bit;
 	bool irq_initialized;
+	bool reset_active;
 
 	u32 version;
 	u32 features;

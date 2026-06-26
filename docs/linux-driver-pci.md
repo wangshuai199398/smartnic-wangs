@@ -8,6 +8,8 @@
 | --- | --- |
 | `drivers/linux/smartnic_pci.c` | PCI ID table、`pci_driver` 注册、probe/remove、BAR 映射和清理 |
 | `drivers/linux/smartnic_pci.h` | 驱动私有 `smartnic_dev`、BAR 状态、锁和设备状态 |
+| `drivers/linux/smartnic_mbox.c` | CSR mailbox 同步命令 helper、timeout、错误码映射和命令串行化 |
+| `drivers/linux/smartnic_mbox.h` | mailbox helper 对后续 ioctl/resource 层暴露的内部 API |
 | `drivers/linux/smartnic_regs.h` | PCI vendor/device ID、BAR 编号和早期 CSR offset 宏 |
 | `drivers/linux/tests/test_smartnic_pci_driver_static.py` | compile-only 前的静态结构检查 |
 
@@ -54,3 +56,31 @@ probe 的每一步都有对应 `goto` unwind label：
 - 中断只保留 `irq_initialized` 清理占位，MSI-X 初始化留给 12.9；
 - mailbox、ioctl、mmap、poll、资源生命周期和 datapath 都未实现；
 - 在非 Linux kernel header 环境下，`make driver` 会运行静态检查并跳过真实 Kbuild。
+
+## CSR Mailbox Helper
+
+12.2 新增 `smartnic_mbox_exec()`，作为后续 ioctl 和资源管理代码的内部控制通道。它的顺序是：
+
+1. 校验输入/输出 buffer 必须按 32-bit 对齐，且最多 4 个 dword；
+2. 检查设备没有处于 remove/quiesce/reset；
+3. 获取 `mbox_lock`，确保同一时间只有一个 mailbox transaction；
+4. 清除旧的 DONE/ERROR/status；
+5. 写入参数寄存器和 command opcode；
+6. 写 `SMARTNIC_MBOX_CTRL_GO` 触发硬件；
+7. 使用 `readl_poll_timeout()` 等待 DONE 或 ERROR；
+8. DONE 后读取输出参数，ERROR 后把设备错误码映射为 Linux errno。
+
+当前错误码映射为：
+
+| 设备错误 | Linux errno |
+| --- | --- |
+| invalid command | `-EOPNOTSUPP` |
+| invalid argument | `-EINVAL` |
+| permission | `-EACCES` |
+| bad state | `-EPERM` |
+| busy | `-EBUSY` |
+| no resource | `-ENOSPC` |
+| timeout | `-ETIMEDOUT` |
+| hardware/internal | `-EIO` |
+
+这个 helper 暂时只处理寄存器窗口中的小参数，不实现 ioctl ABI、大块 DMA 参数缓冲区或异步完成。
