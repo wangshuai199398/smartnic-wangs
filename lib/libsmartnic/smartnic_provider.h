@@ -103,6 +103,18 @@ extern "C" {
 	 SMARTNIC_PROVIDER_ACCESS_REMOTE_ATOMIC | \
 	 SMARTNIC_PROVIDER_ACCESS_RELAXED_ORDER)
 
+#define SMARTNIC_PROVIDER_SEND_SIGNALED  0x00000001U
+#define SMARTNIC_PROVIDER_SEND_SOLICITED 0x00000002U
+#define SMARTNIC_PROVIDER_SEND_FENCE     0x00000004U
+#define SMARTNIC_PROVIDER_SEND_INLINE    0x00000008U
+#define SMARTNIC_PROVIDER_SEND_SUPPORTED_FLAGS \
+	(SMARTNIC_PROVIDER_SEND_SIGNALED | SMARTNIC_PROVIDER_SEND_SOLICITED | \
+	 SMARTNIC_PROVIDER_SEND_FENCE | SMARTNIC_PROVIDER_SEND_INLINE)
+
+#define SMARTNIC_PROVIDER_MAX_WQE_SGE      4U
+#define SMARTNIC_PROVIDER_WQE_INLINE_BYTES 32U
+#define SMARTNIC_PROVIDER_WQE_ALIGNMENT    64U
+
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
 	uint32_t driver_version;
@@ -171,6 +183,16 @@ enum smartnic_provider_qp_state {
 	SMARTNIC_PROVIDER_QPS_ERR = 6,
 };
 
+enum smartnic_provider_wr_opcode {
+	SMARTNIC_PROVIDER_WR_SEND = 0,
+	SMARTNIC_PROVIDER_WR_SEND_WITH_IMM = 1,
+	SMARTNIC_PROVIDER_WR_RDMA_WRITE = 2,
+	SMARTNIC_PROVIDER_WR_RDMA_WRITE_WITH_IMM = 3,
+	SMARTNIC_PROVIDER_WR_RDMA_READ = 4,
+	SMARTNIC_PROVIDER_WR_UD_SEND = 5,
+	SMARTNIC_PROVIDER_WR_UD_SEND_WITH_IMM = 6,
+};
+
 struct smartnic_provider_wc {
 	uint64_t wr_id;
 	uint32_t status;
@@ -224,6 +246,62 @@ struct smartnic_provider_ah_attr {
 	uint8_t src_path_bits;
 	uint32_t qkey;
 	uint32_t dest_qpn;
+};
+
+struct smartnic_provider_sge {
+	uint64_t addr;
+	uint32_t length;
+	uint32_t lkey;
+};
+
+struct smartnic_provider_wqe_ctrl {
+	uint32_t opcode;
+	uint32_t flags;
+	uint64_t wr_id;
+	uint32_t qpn;
+	uint32_t num_sge;
+	uint32_t total_len;
+	uint32_t imm_data_be;
+};
+
+struct smartnic_provider_wqe_rdma {
+	uint64_t remote_addr;
+	uint32_t rkey;
+	uint32_t reserved;
+};
+
+struct smartnic_provider_wqe_ud {
+	uint32_t ah_handle;
+	uint32_t remote_qpn;
+	uint32_t remote_qkey;
+	uint32_t gid_index;
+	struct smartnic_provider_gid dgid;
+};
+
+struct smartnic_provider_wqe {
+	struct smartnic_provider_wqe_ctrl ctrl;
+	struct smartnic_provider_wqe_rdma rdma;
+	struct smartnic_provider_wqe_ud ud;
+	struct smartnic_provider_sge sge[SMARTNIC_PROVIDER_MAX_WQE_SGE];
+	uint8_t inline_data[SMARTNIC_PROVIDER_WQE_INLINE_BYTES];
+	uint32_t inline_len;
+	uint32_t reserved;
+};
+
+struct smartnic_provider_send_wr {
+	uint64_t wr_id;
+	uint32_t opcode;
+	uint32_t send_flags;
+	const struct smartnic_provider_sge *sg_list;
+	uint32_t num_sge;
+	uint32_t imm_data;
+	uint64_t remote_addr;
+	uint32_t rkey;
+	struct smartnic_provider_ah *ah;
+	uint32_t remote_qpn;
+	uint32_t remote_qkey;
+	const void *inline_data;
+	uint32_t inline_len;
 };
 
 struct smartnic_provider_device {
@@ -306,6 +384,10 @@ struct smartnic_provider_qp {
 	uint32_t sq_consumer_index;
 	uint32_t rq_producer_index;
 	uint32_t rq_consumer_index;
+	struct smartnic_provider_wqe *sq_ring;
+	uint64_t *sq_wr_id;
+	uint32_t sq_depth;
+	uint32_t sq_wqe_stride;
 	unsigned int active_ops;
 	unsigned int refcount;
 	struct smartnic_provider_qp_attr attr;
@@ -396,6 +478,10 @@ int smartnic_provider_create_ah(struct smartnic_provider_pd *pd,
 				const struct smartnic_provider_ah_attr *attr,
 				struct smartnic_provider_ah **ah);
 int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
+
+int smartnic_provider_build_send_wqe(struct smartnic_provider_qp *qp,
+				     const struct smartnic_provider_send_wr *wr,
+				     struct smartnic_provider_wqe *wqe_out);
 
 const char *smartnic_provider_strerror(int err);
 

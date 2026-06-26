@@ -132,7 +132,7 @@
 - [x] 13.5 Implement QP create/modify/query/destroy APIs.
 - [x] 13.6 Implement MR register/deregister APIs.
 - [x] 13.7 Implement AH create/destroy APIs for UD.
-- [ ] 13.8 Implement WQE builders for Send, Send with Immediate, RDMA Write, RDMA Write with Immediate, RDMA Read, and supported UD operations.
+- [x] 13.8 Implement WQE builders for Send, Send with Immediate, RDMA Write, RDMA Write with Immediate, RDMA Read, and supported UD operations.
 - [ ] 13.9 Implement post_send and post_recv batching with Doorbell memory barriers.
 - [ ] 13.10 Implement CQE parser that returns Verbs-compatible work completions.
 - [ ] 13.11 Implement async event retrieval and acknowledgement APIs.

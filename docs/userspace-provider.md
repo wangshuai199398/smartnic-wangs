@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。13.8 添加了 Send/RDMA/UD WQE 构建 helper。
 
 ## 已实现的 API
 
@@ -53,6 +53,9 @@ int smartnic_provider_create_ah(struct smartnic_provider_pd *pd,
                                 const struct smartnic_provider_ah_attr *attr,
                                 struct smartnic_provider_ah **ah);
 int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
+int smartnic_provider_build_send_wqe(struct smartnic_provider_qp *qp,
+                                     const struct smartnic_provider_send_wr *wr,
+                                     struct smartnic_provider_wqe *wqe_out);
 ```
 
 ## 设备发现
@@ -220,10 +223,35 @@ AH 对象保存 parent context、PD、kernel AH handle、port、GID index、DGID
 
 `smartnic_provider_destroy_ah()` 会拒绝仍有 active UD operations 或额外 refcount 的 AH，成功后发送 `SMARTNIC_CMD_DESTROY_AH`，释放 PD child/refcount，并从 context AH 链表摘除。13.7 不实现 multicast、特殊地址模式，也不构造真实 UD WQE。
 
-## 13.7 后仍未实现的内容
+## WQE 构建
+
+13.8 定义了 provider-side WQE ABI：
+
+- `smartnic_provider_wqe_ctrl`：opcode、flags、wr_id、QPN、SGE 数量、总长度、immediate data；
+- `smartnic_provider_sge`：本地地址、长度、lkey；
+- `smartnic_provider_wqe_rdma`：remote address 和 rkey；
+- `smartnic_provider_wqe_ud`：AH handle、remote QPN、remote QKey、GID metadata；
+- `smartnic_provider_wqe`：组合后的固定格式 WQE。
+
+`smartnic_provider_build_send_wqe()` 当前支持：
+
+- `SMARTNIC_PROVIDER_WR_SEND`
+- `SMARTNIC_PROVIDER_WR_SEND_WITH_IMM`
+- `SMARTNIC_PROVIDER_WR_RDMA_WRITE`
+- `SMARTNIC_PROVIDER_WR_RDMA_WRITE_WITH_IMM`
+- `SMARTNIC_PROVIDER_WR_RDMA_READ`
+- `SMARTNIC_PROVIDER_WR_UD_SEND`
+- `SMARTNIC_PROVIDER_WR_UD_SEND_WITH_IMM`
+
+builder 会验证 QP 必须处于 RTS；RC op 只能用于 RC QP；UD op 只能用于 UD QP 且必须提供有效 AH。SGE 数量不能超过 QP 限制和 `SMARTNIC_PROVIDER_MAX_WQE_SGE`，每个 SGE 会在当前 context 的 MR 链表中按 lkey 查找，并检查地址范围。RDMA Read 的本地目标 SGE 必须带 `LOCAL_WRITE` MR 权限。
+
+immediate data 通过 `htonl()` 编码为 network byte order，保证 Send with Immediate 和 RDMA Write with Immediate 在 wire/CQE 侧看到一致的 32-bit 值。inline data 仅在 `SMARTNIC_PROVIDER_SEND_INLINE` 被设置且长度不超过 `SMARTNIC_PROVIDER_WQE_INLINE_BYTES` 时接受。
+
+13.8 只写入 QP 的 shadow SQ ring，保存 wr_id，并推进 provider-side producer index；不会批量 post，也不会写 Doorbell。若 SGE、lkey、AH、remote key、send flags 或 SQ 空间检查失败，builder 会返回错误且不会推进 producer index，这就是 13.9 post_send/doorbell 的 rollback 基础。
+
+## 13.8 后仍未实现的内容
 
 - QP send/recv posting；
-- WQE 构建；
 - 快速路径 Doorbell 写入；
 - libibverbs provider 注册。
 
