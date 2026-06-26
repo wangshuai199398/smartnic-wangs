@@ -72,6 +72,8 @@ driver:
 userspace:
 	@echo "[userspace] 进入 libsmartnic 用户态库子目录。"
 	@$(MAKE) -C lib/libsmartnic
+	@echo "[userspace] 构建 smartnicctl 用户态控制工具。"
+	@$(MAKE) -C tools
 
 regression: lint verilator cocotb
 	@echo "[regression] 已完成 lint、Verilator、Cocotb 组合回归入口。"
@@ -83,5 +85,6 @@ clean:
 	@echo "[clean] 清理构建产物占位。"
 	@$(MAKE) -C drivers/linux clean
 	@$(MAKE) -C lib/libsmartnic clean
+	@$(MAKE) -C tools clean
 	@$(MAKE) -C sim/cocotb clean
 	@rm -rf build coverage .pytest_cache

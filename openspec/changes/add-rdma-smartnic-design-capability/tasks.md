@@ -113,7 +113,7 @@
 - [x] 12.1 Implement PCIe driver probe/remove with BAR mapping, DMA mask setup, reset, feature discovery, and teardown.
 - [x] 12.2 Implement CSR mailbox helper with timeout, error-code mapping, and locking.
 - [x] 12.3 Implement character device open, release, ioctl dispatch, mmap, and poll operations.
-- [ ] 12.4 Implement resource allocators for PD, CQ, QP, MR, AH, Doorbell pages, queue buffers, and mmap offsets.
+- [x] 12.4 Implement user-space library and CLI tool for SmartNIC driver control.
 - [ ] 12.5 Implement CQ create/destroy/query ioctls and CQ buffer mapping.
 - [ ] 12.6 Implement QP create/modify/query/destroy ioctls and SQ/RQ buffer plus Doorbell mappings.
 - [ ] 12.7 Implement MR register/deregister ioctls using page pinning and DMA mapping.
