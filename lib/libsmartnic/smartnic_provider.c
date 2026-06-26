@@ -20,6 +20,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_QP 4096U
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_CQ 4096U
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_MR 8192U
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_PD 1024U
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_SGE 256U
+#define SMARTNIC_PROVIDER_DEFAULT_MAX_WR 4096U
+#define SMARTNIC_PROVIDER_DEFAULT_SPEED_GBPS 100U
+#define SMARTNIC_PROVIDER_DEFAULT_WIDTH 1U
+#define SMARTNIC_PROVIDER_VENDOR_ID 0x1d0fU
+#define SMARTNIC_PROVIDER_DEVICE_ID 0x5a10U
+#define SMARTNIC_PROVIDER_FULL_MEMBERSHIP_PKEY 0xffffU
+
 static const char *smartnic_provider_dev_dir(void)
 {
 	const char *override = getenv(SMARTNIC_PROVIDER_ENV_DEV_DIR);
@@ -68,6 +80,33 @@ static int smartnic_provider_mailbox_query(int fd,
 	dev->features = req.data[1];
 	dev->caps = req.data[2];
 	dev->status = req.data[3];
+	return 0;
+}
+
+static int smartnic_provider_context_is_valid(struct smartnic_provider_context *ctx)
+{
+	if (!ctx) {
+		errno = EINVAL;
+		return 0;
+	}
+
+	pthread_mutex_lock(&ctx->lock);
+	if (ctx->closed || ctx->fd < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBADF;
+		return 0;
+	}
+	pthread_mutex_unlock(&ctx->lock);
+	return 1;
+}
+
+static int smartnic_provider_validate_abi(struct smartnic_provider_context *ctx)
+{
+	if (ctx->abi_version != SMARTNIC_PROVIDER_ABI_VERSION) {
+		errno = EPROTO;
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -250,6 +289,85 @@ static int smartnic_provider_query_context(struct smartnic_provider_context *ctx
 	return 0;
 }
 
+static void smartnic_provider_translate_device_attr(
+	struct smartnic_provider_context *ctx,
+	struct smartnic_provider_device_attr *attr)
+{
+	memset(attr, 0, sizeof(*attr));
+	attr->abi_version = ctx->abi_version;
+	attr->driver_version = ctx->driver_version;
+	attr->vendor_id = SMARTNIC_PROVIDER_VENDOR_ID;
+	attr->device_id = SMARTNIC_PROVIDER_DEVICE_ID;
+	attr->features = ctx->features;
+	attr->caps = ctx->caps;
+	attr->status = ctx->status;
+	attr->max_qp = SMARTNIC_PROVIDER_DEFAULT_MAX_QP;
+	attr->max_cq = SMARTNIC_PROVIDER_DEFAULT_MAX_CQ;
+	attr->max_mr = SMARTNIC_PROVIDER_DEFAULT_MAX_MR;
+	attr->max_pd = SMARTNIC_PROVIDER_DEFAULT_MAX_PD;
+	attr->max_sge = SMARTNIC_PROVIDER_DEFAULT_MAX_SGE;
+	attr->max_wr = SMARTNIC_PROVIDER_DEFAULT_MAX_WR;
+	attr->supported_transport = SMARTNIC_PROVIDER_TRANSPORT_RC |
+				    SMARTNIC_PROVIDER_TRANSPORT_UD;
+	attr->link_layer = SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET;
+	attr->atomic_cap = SMARTNIC_PROVIDER_ATOMIC_NONE;
+	attr->page_size_cap = 4096ULL;
+}
+
+static int smartnic_provider_validate_port(uint8_t port_num)
+{
+	if (port_num == 0 || port_num > SMARTNIC_PROVIDER_MAX_PORTS) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static void smartnic_provider_translate_port_attr(
+	uint8_t port_num, struct smartnic_provider_port_attr *attr)
+{
+	memset(attr, 0, sizeof(*attr));
+	attr->port_num = port_num;
+	attr->state = SMARTNIC_PROVIDER_PORT_STATE_ACTIVE;
+	attr->max_mtu = SMARTNIC_PROVIDER_MTU_4096;
+	attr->active_mtu = SMARTNIC_PROVIDER_MTU_4096;
+	attr->lid = 0;
+	attr->link_layer = SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET;
+	attr->active_speed = SMARTNIC_PROVIDER_DEFAULT_SPEED_GBPS;
+	attr->active_width = SMARTNIC_PROVIDER_DEFAULT_WIDTH;
+	attr->gid_tbl_len = SMARTNIC_PROVIDER_GID_TABLE_LEN;
+	attr->pkey_tbl_len = SMARTNIC_PROVIDER_PKEY_TABLE_LEN;
+}
+
+static int smartnic_provider_get_gid(uint8_t port_num, uint32_t index,
+				     struct smartnic_provider_gid *gid)
+{
+	(void)port_num;
+
+	if (index >= SMARTNIC_PROVIDER_GID_TABLE_LEN) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	memset(gid, 0, sizeof(*gid));
+	return 0;
+}
+
+static int smartnic_provider_get_pkey(uint8_t port_num, uint32_t index,
+				      uint16_t *pkey)
+{
+	(void)port_num;
+
+	if (index >= SMARTNIC_PROVIDER_PKEY_TABLE_LEN) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*pkey = SMARTNIC_PROVIDER_FULL_MEMBERSHIP_PKEY;
+	return 0;
+}
+
 int smartnic_provider_open_path(const char *node_path,
 				struct smartnic_provider_context **ctx)
 {
@@ -330,6 +448,91 @@ int smartnic_provider_close(struct smartnic_provider_context *ctx)
 	pthread_mutex_destroy(&ctx->lock);
 	free(ctx);
 	return 0;
+}
+
+int smartnic_provider_query_device(struct smartnic_provider_context *ctx,
+				   struct smartnic_provider_device_attr *attr)
+{
+	if (!attr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_query_context(ctx) < 0)
+		return -1;
+
+	smartnic_provider_translate_device_attr(ctx, attr);
+	return 0;
+}
+
+int smartnic_provider_query_port(struct smartnic_provider_context *ctx,
+				 uint8_t port_num,
+				 struct smartnic_provider_port_attr *attr)
+{
+	if (!attr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_port(port_num) < 0)
+		return -1;
+
+	smartnic_provider_translate_port_attr(port_num, attr);
+	return 0;
+}
+
+int smartnic_provider_query_gid(struct smartnic_provider_context *ctx,
+				uint8_t port_num, uint32_t index,
+				struct smartnic_provider_gid *gid)
+{
+	if (!gid) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_port(port_num) < 0)
+		return -1;
+
+	return smartnic_provider_get_gid(port_num, index, gid);
+}
+
+int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
+				 uint8_t port_num, uint32_t index,
+				 uint16_t *pkey)
+{
+	if (!pkey) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_port(port_num) < 0)
+		return -1;
+
+	return smartnic_provider_get_pkey(port_num, index, pkey);
 }
 
 const char *smartnic_provider_strerror(int err)

@@ -126,7 +126,7 @@
 ## 13. Userspace Verbs Library
 
 - [x] 13.1 Implement device discovery and context open/close APIs.
-- [ ] 13.2 Implement query_device, query_port, query_gid, and query_pkey APIs.
+- [x] 13.2 Implement query_device, query_port, query_gid, and query_pkey APIs.
 - [ ] 13.3 Implement PD alloc/dealloc APIs.
 - [ ] 13.4 Implement CQ create/destroy/resize, poll_cq, and req_notify_cq APIs.
 - [ ] 13.5 Implement QP create/modify/query/destroy APIs.
