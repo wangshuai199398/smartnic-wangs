@@ -9,6 +9,7 @@ ccflags-y += -I$(src)/../../include
 
 obj-m := smartnic.o
 smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o smartnic_dma.o smartnic_queue.o
+smartnic-$(CONFIG_SMARTNIC_KUNIT) += smartnic_kunit.o
 
 .PHONY: all modules syntax-check clean
 
@@ -24,6 +25,7 @@ modules:
 
 syntax-check:
 	@python3 tests/test_smartnic_pci_driver_static.py
+	@python3 tests/test_smartnic_driver_lifecycle_static.py
 
 clean:
 	@if [ -f "$(KDIR)/Makefile" ]; then \
