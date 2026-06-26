@@ -9,16 +9,8 @@
 #ifndef _UAPI_LINUX_SMARTNIC_IOCTL_H
 #define _UAPI_LINUX_SMARTNIC_IOCTL_H
 
-#if defined(__linux__) || defined(__KERNEL__)
 #include <linux/ioctl.h>
 #include <linux/types.h>
-#else
-#include <stdint.h>
-#include <sys/ioctl.h>
-typedef uint16_t __u16;
-typedef uint32_t __u32;
-typedef int32_t __s32;
-#endif
 
 #define SMARTNIC_IOCTL_MAGIC           'S'
 #define SMARTNIC_IOCTL_MAX_DATA_DWORDS 4

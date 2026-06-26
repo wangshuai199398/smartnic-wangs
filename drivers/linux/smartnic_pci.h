@@ -29,6 +29,14 @@ struct smartnic_bar {
 	resource_size_t len;
 };
 
+#define SMARTNIC_DRIVER_MAX_IRQ_VECTORS 4
+
+struct smartnic_irq_entry {
+	int irq;
+	bool requested;
+	char name[32];
+};
+
 struct smartnic_dev {
 	struct pci_dev *pdev;
 	struct device *dev;
@@ -50,11 +58,17 @@ struct smartnic_dev {
 	bool chrdev_registered;
 	atomic_t open_count;
 	atomic_t event_pending;
+	atomic_t mbox_event_pending;
+	atomic_t cq_event_pending;
 
 	dev_t chrdev_devt;
 	struct cdev cdev;
 	struct device *chrdev_device;
 	int chrdev_index;
+
+	int irq_vector_count;
+	u32 irq_last_status;
+	struct smartnic_irq_entry irq_entries[SMARTNIC_DRIVER_MAX_IRQ_VECTORS];
 
 	u32 version;
 	u32 features;

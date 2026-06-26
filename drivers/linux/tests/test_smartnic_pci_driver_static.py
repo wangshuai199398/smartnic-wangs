@@ -23,6 +23,8 @@ def main() -> None:
     mbox_h = read(ROOT / "smartnic_mbox.h")
     chrdev_c = read(ROOT / "smartnic_chrdev.c")
     chrdev_h = read(ROOT / "smartnic_chrdev.h")
+    irq_c = read(ROOT / "smartnic_irq.c")
+    irq_h = read(ROOT / "smartnic_irq.h")
     regs_h = read(ROOT / "smartnic_regs.h")
     makefile = read(ROOT / "Makefile")
     ioctl_h = read(REPO / "include/uapi/linux/smartnic_ioctl.h")
@@ -77,8 +79,13 @@ def main() -> None:
         ("wait_queue_head_t open_wq", "open lifetime wait queue"),
         ("atomic_t open_count", "open reference count"),
         ("atomic_t event_pending", "poll event flag"),
+        ("atomic_t mbox_event_pending", "mailbox event flag"),
+        ("atomic_t cq_event_pending", "CQ event flag"),
         ("struct cdev cdev", "cdev storage"),
         ("dev_t chrdev_devt", "char dev number"),
+        ("irq_vector_count", "IRQ vector count"),
+        ("irq_last_status", "last IRQ status"),
+        ("struct smartnic_irq_entry irq_entries", "IRQ entries"),
     ]:
         require(pci_h, needle, label)
 
@@ -93,12 +100,18 @@ def main() -> None:
         ("#define SMARTNIC_MBOX_STATUS", "mailbox status CSR"),
         ("#define SMARTNIC_MBOX_ERROR", "mailbox error CSR"),
         ("#define SMARTNIC_MBOX_ARG", "mailbox arg CSR helper"),
+        ("#define SMARTNIC_INTR_STATUS", "interrupt status CSR"),
+        ("#define SMARTNIC_INTR_ENABLE", "interrupt enable CSR"),
+        ("#define SMARTNIC_INTR_ACK", "interrupt ack CSR"),
+        ("#define SMARTNIC_INTR_MAILBOX_DONE", "mailbox interrupt bit"),
+        ("#define SMARTNIC_INTR_CQ_EVENT", "CQ interrupt bit"),
+        ("#define SMARTNIC_MAX_IRQ_VECTORS", "max IRQ vectors"),
     ]:
         require(regs_h, needle, label)
 
     require(makefile, "obj-m := smartnic.o", "Kbuild module object")
     require(makefile, "ccflags-y += -I$(src)/../../include", "UAPI include path")
-    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o", "driver object list")
+    require(makefile, "smartnic-y := smartnic_pci.o smartnic_mbox.o smartnic_chrdev.o smartnic_irq.o", "driver object list")
     require(tasks, "- [x] 12.1 Implement PCIe driver probe/remove", "12.1 task completion")
 
     for needle, label in [
@@ -171,10 +184,42 @@ def main() -> None:
     for needle, label in [
         ("smartnic_chrdev_register(sdev)", "probe char dev registration"),
         ("smartnic_chrdev_unregister(sdev)", "remove char dev cleanup"),
+        ("smartnic_irq_setup(sdev)", "probe IRQ setup"),
+        ("smartnic_irq_teardown(sdev)", "remove IRQ teardown"),
     ]:
         require(pci_c, needle, label)
 
     require(tasks, "- [x] 12.3 Implement character device open", "12.3 task completion")
+
+    for needle, label in [
+        ("pci_alloc_irq_vectors", "MSI-X vector allocation"),
+        ("PCI_IRQ_MSIX", "MSI-X flag"),
+        ("pci_irq_vector", "IRQ number lookup"),
+        ("request_irq", "IRQ registration"),
+        ("free_irq", "IRQ free"),
+        ("pci_free_irq_vectors", "MSI-X vector free"),
+        ("synchronize_irq", "IRQ synchronize on teardown"),
+        ("static irqreturn_t smartnic_irq_handler", "ISR"),
+        ("SMARTNIC_INTR_STATUS", "interrupt status read"),
+        ("SMARTNIC_INTR_ACK", "interrupt ack write"),
+        ("SMARTNIC_INTR_MAILBOX_DONE", "mailbox bit handling"),
+        ("SMARTNIC_INTR_CQ_EVENT", "CQ bit handling"),
+        ("wake_up_interruptible(&sdev->event_wq)", "poll wakeup"),
+        ("IRQ_HANDLED", "handled IRQ return"),
+        ("IRQ_NONE", "shared/unrelated IRQ return"),
+        ("smartnic_irq_disable", "IRQ disable helper"),
+        ("SMARTNIC_INTR_ENABLE, 0", "hardware interrupt disable"),
+    ]:
+        require(irq_c, needle, label)
+
+    for needle, label in [
+        ("smartnic_irq_setup", "IRQ setup declaration"),
+        ("smartnic_irq_teardown", "IRQ teardown declaration"),
+        ("smartnic_irq_disable", "IRQ disable declaration"),
+    ]:
+        require(irq_h, needle, label)
+
+    require(tasks, "- [x] 12.5 Implement driver interrupt support", "12.5 task completion")
 
     print("smartnic PCI driver static checks passed")
 

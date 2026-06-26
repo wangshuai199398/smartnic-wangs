@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 
 #include "smartnic_chrdev.h"
+#include "smartnic_irq.h"
 #include "smartnic_pci.h"
 #include "smartnic_regs.h"
 
@@ -167,15 +168,6 @@ static void smartnic_discover_features(struct smartnic_dev *sdev)
 		 sdev->version, sdev->features, sdev->caps, sdev->status);
 }
 
-static void smartnic_disable_interrupts(struct smartnic_dev *sdev)
-{
-	if (!sdev->irq_initialized)
-		return;
-
-	/* MSI-X allocation and handlers are introduced in task 12.9. */
-	sdev->irq_initialized = false;
-}
-
 static void smartnic_quiesce(struct smartnic_dev *sdev)
 {
 	mutex_lock(&sdev->state_lock);
@@ -208,6 +200,8 @@ static int smartnic_pci_probe(struct pci_dev *pdev,
 	init_waitqueue_head(&sdev->open_wq);
 	atomic_set(&sdev->open_count, 0);
 	atomic_set(&sdev->event_pending, 0);
+	atomic_set(&sdev->mbox_event_pending, 0);
+	atomic_set(&sdev->cq_event_pending, 0);
 	pci_set_drvdata(pdev, sdev);
 
 	err = pci_enable_device_mem(pdev);
@@ -245,15 +239,21 @@ static int smartnic_pci_probe(struct pci_dev *pdev,
 	sdev->state = SMARTNIC_DEV_READY;
 	mutex_unlock(&sdev->state_lock);
 
+	err = smartnic_irq_setup(sdev);
+	if (err)
+		goto err_mark_quiescing;
+
 	err = smartnic_chrdev_register(sdev);
 	if (err) {
 		dev_err(&pdev->dev, "failed to register char device: %d\n", err);
-		goto err_mark_quiescing;
+		goto err_irq_teardown;
 	}
 
 	dev_info(&pdev->dev, "SmartNIC PCIe device probed successfully\n");
 	return 0;
 
+err_irq_teardown:
+	smartnic_irq_teardown(sdev);
 err_mark_quiescing:
 	mutex_lock(&sdev->state_lock);
 	sdev->state = SMARTNIC_DEV_QUIESCING;
@@ -284,7 +284,7 @@ static void smartnic_pci_remove(struct pci_dev *pdev)
 
 	smartnic_quiesce(sdev);
 	smartnic_chrdev_unregister(sdev);
-	smartnic_disable_interrupts(sdev);
+	smartnic_irq_teardown(sdev);
 	smartnic_unmap_bars(sdev);
 	pci_clear_master(pdev);
 	pci_release_regions(pdev);

@@ -12,6 +12,8 @@
 | `drivers/linux/smartnic_mbox.h` | mailbox helper 对后续 ioctl/resource 层暴露的内部 API |
 | `drivers/linux/smartnic_chrdev.c` | `/dev/smartnicX` 字符设备、open/release/ioctl/mmap/poll |
 | `drivers/linux/smartnic_chrdev.h` | 字符设备注册/注销接口 |
+| `drivers/linux/smartnic_irq.c` | MSI-X 分配、ISR、状态 ACK、poll/event 唤醒和 teardown |
+| `drivers/linux/smartnic_irq.h` | interrupt setup/teardown helper 接口 |
 | `drivers/linux/smartnic_regs.h` | PCI vendor/device ID、BAR 编号和早期 CSR offset 宏 |
 | `include/uapi/linux/smartnic_ioctl.h` | 用户态可见的最小 ioctl ABI |
 | `drivers/linux/tests/test_smartnic_pci_driver_static.py` | compile-only 前的静态结构检查 |
@@ -109,3 +111,23 @@ probe 的每一步都有对应 `goto` unwind label：
 | `poll` | 有事件时返回 `POLLIN|POLLRDNORM`，可提交命令时返回 `POLLOUT|POLLWRNORM`，teardown 时返回 `POLLERR|POLLHUP` |
 
 `SMARTNIC_IOCTL_MBOX_EXEC` 使用固定大小结构，包含 `struct_size`、opcode、输入/输出 dword 数组和 status。它是 12.3 的教学型最小 ABI；后续 12.4～12.8 会添加资源生命周期 ioctl，而不是把完整 verbs 语义塞进这个 mailbox passthrough。
+
+## Interrupt Support
+
+12.5 新增 MSI-X 中断路径。probe 在 BAR、reset、feature discovery 之后调用 `smartnic_irq_setup()`：
+
+1. `pci_alloc_irq_vectors()` 请求 1 到 4 个 MSI-X vector；
+2. 每个 vector 使用 `request_irq()` 注册同一个 ISR，并用名字区分 admin/event/CQ；
+3. 清除旧 interrupt status，写 `SMARTNIC_INTR_ENABLE` 打开 mailbox、admin event、CQ event 和 fatal error 位；
+4. probe 后续失败时调用 `smartnic_irq_teardown()` 回滚已经申请的 vector。
+
+ISR 的最小行为：
+
+- 读取 `SMARTNIC_INTR_STATUS`；
+- 如果没有属于本设备的位，返回 `IRQ_NONE`；
+- 对已处理位写 `SMARTNIC_INTR_ACK`；
+- mailbox done / admin event / CQ event / fatal error 都会设置 `event_pending`；
+- mailbox 和 CQ 另有独立 pending flag，便于后续 ioctl/CQ event path 消费；
+- 使用 `wake_up_interruptible()` 唤醒 `poll()` 等待者。
+
+remove 时先让 char device 进入 teardown，然后 `smartnic_irq_teardown()` 会关闭硬件中断、`synchronize_irq()`、`free_irq()` 并释放 MSI-X vectors。真实 CQ event queue、CQ vector routing 和 per-CQ moderation 仍留给后续资源/中断任务扩展。

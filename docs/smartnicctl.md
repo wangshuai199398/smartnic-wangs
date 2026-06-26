@@ -39,4 +39,4 @@ make -C tools test
 tools/smartnicctl --help
 ```
 
-如果本机没有加载 SmartNIC 内核模块，`info`/`reset` 会清楚打印打开设备失败；这也是当前测试覆盖的负路径。
+这些工具面向 Linux 构建环境，依赖 Linux UAPI headers，例如 `linux/ioctl.h` 和 `linux/types.h`。如果本机没有加载 SmartNIC 内核模块，`info`/`reset` 会清楚打印打开设备失败；这也是当前测试覆盖的负路径。
