@@ -119,7 +119,7 @@ def main() -> None:
         "smartnic_provider_open",
         "smartnic_provider_close",
         "SMARTNIC_PROVIDER_DEV_DIR",
-        "13.4 后仍未实现的内容",
+        "13.5 后仍未实现的内容",
         "smartnic_provider_query_device",
         "smartnic_provider_query_port",
         "smartnic_provider_query_gid",
@@ -131,6 +131,10 @@ def main() -> None:
         "smartnic_provider_resize_cq",
         "smartnic_provider_poll_cq",
         "smartnic_provider_req_notify_cq",
+        "smartnic_provider_create_qp",
+        "smartnic_provider_modify_qp",
+        "smartnic_provider_query_qp",
+        "smartnic_provider_destroy_qp",
     ]:
         require(provider_doc, needle, f"userspace provider doc {needle}")
 

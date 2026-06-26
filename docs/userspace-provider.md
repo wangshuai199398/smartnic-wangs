@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。
 
 ## 已实现的 API
 
@@ -35,6 +35,16 @@ int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
                               struct smartnic_provider_wc *wc);
 int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
                                     int solicited_only);
+int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,
+                                const struct smartnic_provider_qp_init_attr *init_attr,
+                                struct smartnic_provider_qp **qp);
+int smartnic_provider_modify_qp(struct smartnic_provider_qp *qp,
+                                const struct smartnic_provider_qp_attr *attr,
+                                uint32_t attr_mask);
+int smartnic_provider_query_qp(struct smartnic_provider_qp *qp,
+                               struct smartnic_provider_qp_attr *attr,
+                               struct smartnic_provider_qp_init_attr *init_attr);
+int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp);
 ```
 
 ## 设备发现
@@ -131,9 +141,34 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 
 `smartnic_provider_req_notify_cq()` 通过 `SMARTNIC_CMD_ARM_CQ` arm CQ，支持 next-completion 和 solicited-only 两种模式。当前 poll/notify race 策略是先由调用方 poll drain，再 arm，再按需重新 poll；后续正式 verbs glue 会把该顺序封装为 libibverbs 兼容语义。
 
-## 13.4 后仍未实现的内容
+## QP 生命周期
 
-- QP 创建或提交；
+`smartnic_provider_create_qp()` 需要一个有效 PD，以及 send CQ / recv CQ。创建前会校验：
+
+- PD 和 CQ 必须属于同一个 provider context；
+- QP type 当前支持 RC 和 UD，其他类型返回 `EOPNOTSUPP`；
+- `max_send_wr`、`max_recv_wr`、`max_send_sge`、`max_recv_sge` 必须非 0 且不超过 provider 默认能力；
+- context 中 QP 数量不能超过 `SMARTNIC_PROVIDER_DEFAULT_MAX_QP`。
+
+创建成功后，provider 会保存 QPN/kernel handle、QP type、初始 RESET 状态、SQ/RQ capacity、SGE limit、SQ/RQ index 元数据，并增加 PD、send CQ、recv CQ 的 child/refcount。当前阶段不分配真实 SQ/RQ ring，也不 mmap Doorbell 页；这些留给 post_send/post_recv 和 fast path 任务。
+
+`smartnic_provider_modify_qp()` 先做 provider 侧状态迁移校验，kernel 命令成功后才更新 cached state。当前支持的基础迁移包括：
+
+| 迁移 | 必需属性 |
+| --- | --- |
+| RESET -> INIT | state、port、P_Key index |
+| INIT -> RTR | state、path MTU、dest QPN、RQ PSN |
+| RTR -> RTS | state、SQ PSN、retry/RNR retry、timeout |
+| RTS -> SQD | state |
+| any -> ERR | state |
+
+明显非法迁移会返回 `EINVAL`。13.5 只实现用户态 provider 的基本状态门禁，完整 IBTA 属性语义、retry 和路径规则仍由硬件/驱动和后续任务细化。
+
+`smartnic_provider_query_qp()` 返回 provider cached QP attrs 和 init attrs。`smartnic_provider_destroy_qp()` 会拒绝仍有 active operations 或额外引用的 QP，成功销毁 kernel QP 后释放 PD/CQ child 引用，并从 context QP 链表摘除。
+
+## 13.5 后仍未实现的内容
+
+- QP send/recv posting；
 - MR 注册；
 - AH 管理；
 - 快速路径 Doorbell 写入；

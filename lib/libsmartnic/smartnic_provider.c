@@ -308,6 +308,223 @@ static void smartnic_provider_translate_wc(const uint32_t data[4],
 		wc->vendor_err = data[3];
 }
 
+static struct smartnic_provider_qp *
+smartnic_provider_qp_alloc_object(struct smartnic_provider_context *ctx,
+				  struct smartnic_provider_pd *pd,
+				  const struct smartnic_provider_qp_init_attr *init_attr,
+				  uint32_t qpn)
+{
+	struct smartnic_provider_qp *qp;
+
+	qp = calloc(1, sizeof(*qp));
+	if (!qp)
+		return NULL;
+
+	qp->magic = SMARTNIC_PROVIDER_OBJECT_MAGIC_QP;
+	qp->ctx = ctx;
+	qp->pd = pd;
+	qp->send_cq = init_attr->send_cq;
+	qp->recv_cq = init_attr->recv_cq;
+	qp->qpn = qpn;
+	qp->kernel_handle = qpn;
+	qp->qp_type = init_attr->qp_type;
+	qp->qp_state = SMARTNIC_PROVIDER_QPS_RESET;
+	qp->max_send_wr = init_attr->max_send_wr;
+	qp->max_recv_wr = init_attr->max_recv_wr;
+	qp->max_send_sge = init_attr->max_send_sge;
+	qp->max_recv_sge = init_attr->max_recv_sge;
+	qp->refcount = 1;
+	qp->init_attr = *init_attr;
+	qp->attr.qp_state = SMARTNIC_PROVIDER_QPS_RESET;
+	qp->attr.qp_type = init_attr->qp_type;
+	qp->attr.qpn = qpn;
+
+	if (pthread_mutex_init(&qp->lock, NULL) != 0) {
+		free(qp);
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	return qp;
+}
+
+static void smartnic_provider_qp_free_object(struct smartnic_provider_qp *qp)
+{
+	if (!qp)
+		return;
+
+	pthread_mutex_destroy(&qp->lock);
+	free(qp);
+}
+
+static void smartnic_provider_qp_link_locked(struct smartnic_provider_context *ctx,
+					     struct smartnic_provider_qp *qp)
+{
+	qp->next = ctx->qp_list;
+	ctx->qp_list = qp;
+	ctx->qp_count++;
+}
+
+static int smartnic_provider_qp_unlink_locked(struct smartnic_provider_context *ctx,
+					      struct smartnic_provider_qp *qp)
+{
+	struct smartnic_provider_qp **cursor = &ctx->qp_list;
+
+	while (*cursor) {
+		if (*cursor == qp) {
+			*cursor = qp->next;
+			qp->next = NULL;
+			if (ctx->qp_count)
+				ctx->qp_count--;
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int smartnic_provider_qp_is_linked_locked(struct smartnic_provider_context *ctx,
+						 const struct smartnic_provider_qp *qp)
+{
+	const struct smartnic_provider_qp *cursor;
+
+	for (cursor = ctx->qp_list; cursor; cursor = cursor->next) {
+		if (cursor == qp)
+			return 1;
+	}
+
+	return 0;
+}
+
+static int smartnic_provider_validate_qp_type(uint32_t qp_type)
+{
+	if (qp_type == SMARTNIC_PROVIDER_QPT_RC ||
+	    qp_type == SMARTNIC_PROVIDER_QPT_UD)
+		return 0;
+
+	errno = EOPNOTSUPP;
+	return -1;
+}
+
+static int smartnic_provider_validate_qp_caps(
+	const struct smartnic_provider_qp_init_attr *init_attr)
+{
+	if (!init_attr || init_attr->max_send_wr == 0 ||
+	    init_attr->max_recv_wr == 0 || init_attr->max_send_sge == 0 ||
+	    init_attr->max_recv_sge == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (init_attr->max_send_wr > SMARTNIC_PROVIDER_DEFAULT_MAX_WR ||
+	    init_attr->max_recv_wr > SMARTNIC_PROVIDER_DEFAULT_MAX_WR ||
+	    init_attr->max_send_sge > SMARTNIC_PROVIDER_DEFAULT_MAX_SGE ||
+	    init_attr->max_recv_sge > SMARTNIC_PROVIDER_DEFAULT_MAX_SGE) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return smartnic_provider_validate_qp_type(init_attr->qp_type);
+}
+
+static int smartnic_provider_validate_qp_transition(uint32_t current_state,
+						    uint32_t next_state,
+						    uint32_t attr_mask)
+{
+	uint32_t required = SMARTNIC_PROVIDER_QP_ATTR_STATE;
+
+	if ((attr_mask & SMARTNIC_PROVIDER_QP_ATTR_STATE) == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (next_state == SMARTNIC_PROVIDER_QPS_ERR)
+		return 0;
+
+	if (current_state == next_state)
+		return 0;
+
+	if (current_state == SMARTNIC_PROVIDER_QPS_RESET &&
+	    next_state == SMARTNIC_PROVIDER_QPS_INIT)
+		required = SMARTNIC_PROVIDER_QP_REQUIRED_INIT;
+	else if (current_state == SMARTNIC_PROVIDER_QPS_INIT &&
+		 next_state == SMARTNIC_PROVIDER_QPS_RTR)
+		required = SMARTNIC_PROVIDER_QP_REQUIRED_RTR;
+	else if (current_state == SMARTNIC_PROVIDER_QPS_RTR &&
+		 next_state == SMARTNIC_PROVIDER_QPS_RTS)
+		required = SMARTNIC_PROVIDER_QP_REQUIRED_RTS;
+	else if (current_state == SMARTNIC_PROVIDER_QPS_RTS &&
+		 next_state == SMARTNIC_PROVIDER_QPS_SQD)
+		required = SMARTNIC_PROVIDER_QP_ATTR_STATE;
+	else {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if ((attr_mask & required) != required) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static int smartnic_provider_qp_refs_valid_locked(struct smartnic_provider_context *ctx,
+						  struct smartnic_provider_pd *pd,
+						  struct smartnic_provider_cq *send_cq,
+						  struct smartnic_provider_cq *recv_cq)
+{
+	if (!pd || pd->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_PD ||
+	    pd->ctx != ctx || !smartnic_provider_pd_is_linked_locked(ctx, pd)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!send_cq || send_cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ ||
+	    send_cq->ctx != ctx ||
+	    !smartnic_provider_cq_is_linked_locked(ctx, send_cq)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!recv_cq || recv_cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ ||
+	    recv_cq->ctx != ctx ||
+	    !smartnic_provider_cq_is_linked_locked(ctx, recv_cq)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static void smartnic_provider_qp_hold_refs_locked(struct smartnic_provider_qp *qp)
+{
+	qp->pd->child_count++;
+	qp->pd->refcount++;
+	qp->send_cq->child_count++;
+	qp->send_cq->refcount++;
+	qp->recv_cq->child_count++;
+	qp->recv_cq->refcount++;
+}
+
+static void smartnic_provider_qp_put_refs_locked(struct smartnic_provider_qp *qp)
+{
+	if (qp->pd->child_count)
+		qp->pd->child_count--;
+	if (qp->pd->refcount)
+		qp->pd->refcount--;
+	if (qp->send_cq->child_count)
+		qp->send_cq->child_count--;
+	if (qp->send_cq->refcount)
+		qp->send_cq->refcount--;
+	if (qp->recv_cq->child_count)
+		qp->recv_cq->child_count--;
+	if (qp->recv_cq->refcount)
+		qp->recv_cq->refcount--;
+}
+
 static int smartnic_provider_validate_node(const char *path,
 					   struct smartnic_provider_device *dev)
 {
@@ -1095,6 +1312,255 @@ int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
 	cq->solicited_only = solicited_only ? 1 : 0;
 	pthread_mutex_unlock(&cq->lock);
 	pthread_mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,
+				const struct smartnic_provider_qp_init_attr *init_attr,
+				struct smartnic_provider_qp **qp)
+{
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_qp *new_qp;
+	uint32_t in[4];
+	uint32_t out[1] = { 0 };
+
+	if (!qp) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*qp = NULL;
+	if (!pd || pd->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_PD || !pd->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = pd->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_qp_caps(init_attr) < 0)
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (ctx->qp_count >= SMARTNIC_PROVIDER_DEFAULT_MAX_QP) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = ENOSPC;
+		return -1;
+	}
+
+	if (smartnic_provider_qp_refs_valid_locked(ctx, pd, init_attr->send_cq,
+						   init_attr->recv_cq) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	in[0] = init_attr->qp_type;
+	in[1] = init_attr->max_send_wr;
+	in[2] = init_attr->max_recv_wr;
+	in[3] = (init_attr->max_send_sge & 0xffffU) |
+		((init_attr->max_recv_sge & 0xffffU) << 16);
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_CREATE_QP,
+					   in, 4, out, 1) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (out[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EIO;
+		return -1;
+	}
+
+	new_qp = smartnic_provider_qp_alloc_object(ctx, pd, init_attr, out[0]);
+	if (!new_qp) {
+		uint32_t destroy_in[1] = { out[0] };
+		int saved_errno = errno;
+
+		(void)smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_QP,
+						     destroy_in, 1, NULL, 0);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = saved_errno;
+		return -1;
+	}
+
+	smartnic_provider_qp_hold_refs_locked(new_qp);
+	smartnic_provider_qp_link_locked(ctx, new_qp);
+	pthread_mutex_unlock(&ctx->lock);
+
+	*qp = new_qp;
+	return 0;
+}
+
+int smartnic_provider_modify_qp(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_qp_attr *attr,
+				uint32_t attr_mask)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[4];
+
+	if (!qp || qp->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_QP || !qp->ctx ||
+	    !attr) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = qp->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_qp_is_linked_locked(ctx, qp)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&qp->lock);
+	if (smartnic_provider_validate_qp_transition(qp->qp_state,
+						     attr->qp_state,
+						     attr_mask) < 0) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	in[0] = qp->kernel_handle;
+	in[1] = attr->qp_state;
+	in[2] = attr_mask;
+	in[3] = attr->dest_qpn;
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_MODIFY_QP,
+					   in, 4, NULL, 0) < 0) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_STATE) {
+		qp->qp_state = attr->qp_state;
+		qp->attr.qp_state = attr->qp_state;
+	}
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_PORT)
+		qp->attr.port_num = attr->port_num;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_PKEY_INDEX)
+		qp->attr.pkey_index = attr->pkey_index;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_QKEY)
+		qp->attr.qkey = attr->qkey;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_PATH_MTU)
+		qp->attr.path_mtu = attr->path_mtu;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_DEST_QPN)
+		qp->attr.dest_qpn = attr->dest_qpn;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_RQ_PSN)
+		qp->attr.rq_psn = attr->rq_psn;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_SQ_PSN)
+		qp->attr.sq_psn = attr->sq_psn;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_ACCESS_FLAGS)
+		qp->attr.access_flags = attr->access_flags;
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_RETRY) {
+		qp->attr.retry_count = attr->retry_count;
+		qp->attr.rnr_retry = attr->rnr_retry;
+	}
+	if (attr_mask & SMARTNIC_PROVIDER_QP_ATTR_TIMEOUT)
+		qp->attr.timeout = attr->timeout;
+
+	pthread_mutex_unlock(&qp->lock);
+	pthread_mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+int smartnic_provider_query_qp(struct smartnic_provider_qp *qp,
+			       struct smartnic_provider_qp_attr *attr,
+			       struct smartnic_provider_qp_init_attr *init_attr)
+{
+	struct smartnic_provider_context *ctx;
+
+	if (!qp || qp->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_QP || !qp->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = qp->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_qp_is_linked_locked(ctx, qp)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&qp->lock);
+	if (attr)
+		*attr = qp->attr;
+	if (init_attr)
+		*init_attr = qp->init_attr;
+	pthread_mutex_unlock(&qp->lock);
+	pthread_mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[1];
+
+	if (!qp || qp->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_QP || !qp->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = qp->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_qp_is_linked_locked(ctx, qp)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&qp->lock);
+	if (qp->active_ops != 0 || qp->refcount > 1) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBUSY;
+		return -1;
+	}
+
+	in[0] = qp->kernel_handle;
+	if (in[0] == 0) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_QP,
+					   in, 1, NULL, 0) < 0) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (smartnic_provider_qp_unlink_locked(ctx, qp) < 0) {
+		pthread_mutex_unlock(&qp->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	smartnic_provider_qp_put_refs_locked(qp);
+	qp->magic = 0;
+	qp->ctx = NULL;
+	qp->kernel_handle = 0;
+	pthread_mutex_unlock(&qp->lock);
+	pthread_mutex_unlock(&ctx->lock);
+
+	smartnic_provider_qp_free_object(qp);
 	return 0;
 }
 

@@ -42,9 +42,14 @@ extern "C" {
 #define SMARTNIC_CMD_RESIZE_CQ    0x0203
 #define SMARTNIC_CMD_POLL_CQ      0x0204
 #define SMARTNIC_CMD_ARM_CQ       0x0205
+#define SMARTNIC_CMD_CREATE_QP    0x0301
+#define SMARTNIC_CMD_MODIFY_QP    0x0302
+#define SMARTNIC_CMD_QUERY_QP     0x0303
+#define SMARTNIC_CMD_DESTROY_QP   0x0304
 
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_PD 0x534e5044U
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ 0x534e4345U
+#define SMARTNIC_PROVIDER_OBJECT_MAGIC_QP 0x534e5150U
 
 #define SMARTNIC_PROVIDER_WC_FLAG_IMM 0x00000001U
 
@@ -57,6 +62,28 @@ extern "C" {
 #define SMARTNIC_PROVIDER_CQE_OPCODE_MASK 0x0000ff00U
 #define SMARTNIC_PROVIDER_CQE_FLAGS_SHIFT 16U
 #define SMARTNIC_PROVIDER_CQE_FLAGS_MASK 0x00ff0000U
+
+#define SMARTNIC_PROVIDER_QP_ATTR_STATE        0x00000001U
+#define SMARTNIC_PROVIDER_QP_ATTR_PORT         0x00000002U
+#define SMARTNIC_PROVIDER_QP_ATTR_PKEY_INDEX   0x00000004U
+#define SMARTNIC_PROVIDER_QP_ATTR_QKEY         0x00000008U
+#define SMARTNIC_PROVIDER_QP_ATTR_PATH_MTU     0x00000010U
+#define SMARTNIC_PROVIDER_QP_ATTR_DEST_QPN     0x00000020U
+#define SMARTNIC_PROVIDER_QP_ATTR_RQ_PSN       0x00000040U
+#define SMARTNIC_PROVIDER_QP_ATTR_SQ_PSN       0x00000080U
+#define SMARTNIC_PROVIDER_QP_ATTR_ACCESS_FLAGS 0x00000100U
+#define SMARTNIC_PROVIDER_QP_ATTR_RETRY        0x00000200U
+#define SMARTNIC_PROVIDER_QP_ATTR_TIMEOUT      0x00000400U
+
+#define SMARTNIC_PROVIDER_QP_REQUIRED_INIT \
+	(SMARTNIC_PROVIDER_QP_ATTR_STATE | SMARTNIC_PROVIDER_QP_ATTR_PORT | \
+	 SMARTNIC_PROVIDER_QP_ATTR_PKEY_INDEX)
+#define SMARTNIC_PROVIDER_QP_REQUIRED_RTR \
+	(SMARTNIC_PROVIDER_QP_ATTR_STATE | SMARTNIC_PROVIDER_QP_ATTR_PATH_MTU | \
+	 SMARTNIC_PROVIDER_QP_ATTR_DEST_QPN | SMARTNIC_PROVIDER_QP_ATTR_RQ_PSN)
+#define SMARTNIC_PROVIDER_QP_REQUIRED_RTS \
+	(SMARTNIC_PROVIDER_QP_ATTR_STATE | SMARTNIC_PROVIDER_QP_ATTR_SQ_PSN | \
+	 SMARTNIC_PROVIDER_QP_ATTR_RETRY | SMARTNIC_PROVIDER_QP_ATTR_TIMEOUT)
 
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
@@ -111,6 +138,21 @@ enum smartnic_provider_wc_opcode {
 	SMARTNIC_PROVIDER_WC_RECV_RDMA_WITH_IMM = 4,
 };
 
+enum smartnic_provider_qp_type {
+	SMARTNIC_PROVIDER_QPT_RC = 1,
+	SMARTNIC_PROVIDER_QPT_UD = 3,
+};
+
+enum smartnic_provider_qp_state {
+	SMARTNIC_PROVIDER_QPS_RESET = 0,
+	SMARTNIC_PROVIDER_QPS_INIT = 1,
+	SMARTNIC_PROVIDER_QPS_RTR = 2,
+	SMARTNIC_PROVIDER_QPS_RTS = 3,
+	SMARTNIC_PROVIDER_QPS_SQD = 4,
+	SMARTNIC_PROVIDER_QPS_SQE = 5,
+	SMARTNIC_PROVIDER_QPS_ERR = 6,
+};
+
 struct smartnic_provider_wc {
 	uint64_t wr_id;
 	uint32_t status;
@@ -120,6 +162,34 @@ struct smartnic_provider_wc {
 	uint32_t vendor_err;
 	uint32_t imm_data;
 	uint32_t wc_flags;
+};
+
+struct smartnic_provider_qp_init_attr {
+	struct smartnic_provider_cq *send_cq;
+	struct smartnic_provider_cq *recv_cq;
+	uint32_t qp_type;
+	uint32_t max_send_wr;
+	uint32_t max_recv_wr;
+	uint32_t max_send_sge;
+	uint32_t max_recv_sge;
+	uint32_t sq_sig_all;
+};
+
+struct smartnic_provider_qp_attr {
+	uint32_t qp_state;
+	uint32_t qp_type;
+	uint32_t qpn;
+	uint8_t port_num;
+	uint16_t pkey_index;
+	uint32_t qkey;
+	uint32_t path_mtu;
+	uint32_t dest_qpn;
+	uint32_t rq_psn;
+	uint32_t sq_psn;
+	uint32_t access_flags;
+	uint8_t retry_count;
+	uint8_t rnr_retry;
+	uint8_t timeout;
 };
 
 struct smartnic_provider_device {
@@ -149,6 +219,7 @@ struct smartnic_provider_context {
 	unsigned int ah_count;
 	struct smartnic_provider_pd *pd_list;
 	struct smartnic_provider_cq *cq_list;
+	struct smartnic_provider_qp *qp_list;
 	int closed;
 };
 
@@ -178,6 +249,32 @@ struct smartnic_provider_cq {
 	int armed;
 	int solicited_only;
 	struct smartnic_provider_cq *next;
+};
+
+struct smartnic_provider_qp {
+	uint32_t magic;
+	struct smartnic_provider_context *ctx;
+	struct smartnic_provider_pd *pd;
+	struct smartnic_provider_cq *send_cq;
+	struct smartnic_provider_cq *recv_cq;
+	pthread_mutex_t lock;
+	uint32_t qpn;
+	uint32_t kernel_handle;
+	uint32_t qp_type;
+	uint32_t qp_state;
+	uint32_t max_send_wr;
+	uint32_t max_recv_wr;
+	uint32_t max_send_sge;
+	uint32_t max_recv_sge;
+	uint32_t sq_producer_index;
+	uint32_t sq_consumer_index;
+	uint32_t rq_producer_index;
+	uint32_t rq_consumer_index;
+	unsigned int active_ops;
+	unsigned int refcount;
+	struct smartnic_provider_qp_attr attr;
+	struct smartnic_provider_qp_init_attr init_attr;
+	struct smartnic_provider_qp *next;
 };
 
 int smartnic_provider_discover(struct smartnic_provider_device **devices,
@@ -214,6 +311,17 @@ int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
 			      struct smartnic_provider_wc *wc);
 int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
 				    int solicited_only);
+
+int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,
+				const struct smartnic_provider_qp_init_attr *init_attr,
+				struct smartnic_provider_qp **qp);
+int smartnic_provider_modify_qp(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_qp_attr *attr,
+				uint32_t attr_mask);
+int smartnic_provider_query_qp(struct smartnic_provider_qp *qp,
+			       struct smartnic_provider_qp_attr *attr,
+			       struct smartnic_provider_qp_init_attr *init_attr);
+int smartnic_provider_destroy_qp(struct smartnic_provider_qp *qp);
 
 const char *smartnic_provider_strerror(int err);
 
