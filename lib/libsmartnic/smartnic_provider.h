@@ -115,6 +115,9 @@ extern "C" {
 #define SMARTNIC_PROVIDER_WQE_INLINE_BYTES 32U
 #define SMARTNIC_PROVIDER_WQE_ALIGNMENT    64U
 
+#define SMARTNIC_PROVIDER_DB_TYPE_SQ 1U
+#define SMARTNIC_PROVIDER_DB_TYPE_RQ 2U
+
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
 	uint32_t driver_version;
@@ -290,6 +293,7 @@ struct smartnic_provider_wqe {
 
 struct smartnic_provider_send_wr {
 	uint64_t wr_id;
+	const struct smartnic_provider_send_wr *next;
 	uint32_t opcode;
 	uint32_t send_flags;
 	const struct smartnic_provider_sge *sg_list;
@@ -302,6 +306,20 @@ struct smartnic_provider_send_wr {
 	uint32_t remote_qkey;
 	const void *inline_data;
 	uint32_t inline_len;
+};
+
+struct smartnic_provider_recv_wr {
+	uint64_t wr_id;
+	const struct smartnic_provider_recv_wr *next;
+	const struct smartnic_provider_sge *sg_list;
+	uint32_t num_sge;
+};
+
+struct smartnic_provider_doorbell_record {
+	uint32_t qpn;
+	uint32_t queue_type;
+	uint32_t producer_index;
+	uint32_t count;
 };
 
 struct smartnic_provider_device {
@@ -386,8 +404,18 @@ struct smartnic_provider_qp {
 	uint32_t rq_consumer_index;
 	struct smartnic_provider_wqe *sq_ring;
 	uint64_t *sq_wr_id;
+	uint32_t *sq_opcode;
+	uint8_t *sq_signaled;
+	struct smartnic_provider_wqe *rq_ring;
+	uint64_t *rq_wr_id;
 	uint32_t sq_depth;
+	uint32_t rq_depth;
 	uint32_t sq_wqe_stride;
+	uint32_t rq_wqe_stride;
+	struct smartnic_provider_doorbell_record last_sq_doorbell;
+	struct smartnic_provider_doorbell_record last_rq_doorbell;
+	uint32_t sq_doorbell_count;
+	uint32_t rq_doorbell_count;
 	unsigned int active_ops;
 	unsigned int refcount;
 	struct smartnic_provider_qp_attr attr;
@@ -482,6 +510,12 @@ int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
 int smartnic_provider_build_send_wqe(struct smartnic_provider_qp *qp,
 				     const struct smartnic_provider_send_wr *wr,
 				     struct smartnic_provider_wqe *wqe_out);
+int smartnic_provider_post_send(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_send_wr *wr_list,
+				const struct smartnic_provider_send_wr **bad_wr);
+int smartnic_provider_post_recv(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_recv_wr *wr_list,
+				const struct smartnic_provider_recv_wr **bad_wr);
 
 const char *smartnic_provider_strerror(int err);
 

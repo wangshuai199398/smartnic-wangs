@@ -335,7 +335,9 @@ smartnic_provider_qp_alloc_object(struct smartnic_provider_context *ctx,
 	qp->max_send_sge = init_attr->max_send_sge;
 	qp->max_recv_sge = init_attr->max_recv_sge;
 	qp->sq_depth = init_attr->max_send_wr;
+	qp->rq_depth = init_attr->max_recv_wr;
 	qp->sq_wqe_stride = sizeof(struct smartnic_provider_wqe);
+	qp->rq_wqe_stride = sizeof(struct smartnic_provider_wqe);
 	qp->refcount = 1;
 	qp->init_attr = *init_attr;
 	qp->attr.qp_state = SMARTNIC_PROVIDER_QPS_RESET;
@@ -343,7 +345,16 @@ smartnic_provider_qp_alloc_object(struct smartnic_provider_context *ctx,
 	qp->attr.qpn = qpn;
 	qp->sq_ring = calloc(qp->sq_depth, sizeof(*qp->sq_ring));
 	qp->sq_wr_id = calloc(qp->sq_depth, sizeof(*qp->sq_wr_id));
-	if (!qp->sq_ring || !qp->sq_wr_id) {
+	qp->sq_opcode = calloc(qp->sq_depth, sizeof(*qp->sq_opcode));
+	qp->sq_signaled = calloc(qp->sq_depth, sizeof(*qp->sq_signaled));
+	qp->rq_ring = calloc(qp->rq_depth, sizeof(*qp->rq_ring));
+	qp->rq_wr_id = calloc(qp->rq_depth, sizeof(*qp->rq_wr_id));
+	if (!qp->sq_ring || !qp->sq_wr_id || !qp->sq_opcode ||
+	    !qp->sq_signaled || !qp->rq_ring || !qp->rq_wr_id) {
+		free(qp->rq_wr_id);
+		free(qp->rq_ring);
+		free(qp->sq_signaled);
+		free(qp->sq_opcode);
 		free(qp->sq_wr_id);
 		free(qp->sq_ring);
 		free(qp);
@@ -352,6 +363,10 @@ smartnic_provider_qp_alloc_object(struct smartnic_provider_context *ctx,
 	}
 
 	if (pthread_mutex_init(&qp->lock, NULL) != 0) {
+		free(qp->rq_wr_id);
+		free(qp->rq_ring);
+		free(qp->sq_signaled);
+		free(qp->sq_opcode);
 		free(qp->sq_wr_id);
 		free(qp->sq_ring);
 		free(qp);
@@ -368,6 +383,10 @@ static void smartnic_provider_qp_free_object(struct smartnic_provider_qp *qp)
 		return;
 
 	pthread_mutex_destroy(&qp->lock);
+	free(qp->rq_wr_id);
+	free(qp->rq_ring);
+	free(qp->sq_signaled);
+	free(qp->sq_opcode);
 	free(qp->sq_wr_id);
 	free(qp->sq_ring);
 	free(qp);
@@ -980,6 +999,122 @@ static void smartnic_provider_fill_wqe(struct smartnic_provider_qp *qp,
 		memcpy(wqe->inline_data, wr->inline_data, wr->inline_len);
 		wqe->inline_len = wr->inline_len;
 	}
+}
+
+static void smartnic_provider_wmb(void)
+{
+	__sync_synchronize();
+}
+
+static void smartnic_provider_write_doorbell(struct smartnic_provider_qp *qp,
+					     uint32_t queue_type,
+					     uint32_t producer_index,
+					     uint32_t count)
+{
+	struct smartnic_provider_doorbell_record record;
+
+	record.qpn = qp->qpn;
+	record.queue_type = queue_type;
+	record.producer_index = producer_index;
+	record.count = count;
+
+	smartnic_provider_wmb();
+	if (queue_type == SMARTNIC_PROVIDER_DB_TYPE_SQ) {
+		qp->last_sq_doorbell = record;
+		qp->sq_doorbell_count++;
+	} else {
+		qp->last_rq_doorbell = record;
+		qp->rq_doorbell_count++;
+	}
+}
+
+static int smartnic_provider_validate_recv_state(struct smartnic_provider_qp *qp)
+{
+	if (qp->qp_state != SMARTNIC_PROVIDER_QPS_INIT &&
+	    qp->qp_state != SMARTNIC_PROVIDER_QPS_RTR &&
+	    qp->qp_state != SMARTNIC_PROVIDER_QPS_RTS) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static int smartnic_provider_validate_recv_sges(struct smartnic_provider_context *ctx,
+						struct smartnic_provider_qp *qp,
+						const struct smartnic_provider_recv_wr *wr,
+						uint32_t *total_len)
+{
+	uint64_t total = 0;
+	uint32_t i;
+
+	if (wr->num_sge > qp->max_recv_sge ||
+	    wr->num_sge > SMARTNIC_PROVIDER_MAX_WQE_SGE) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (wr->num_sge && !wr->sg_list) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	for (i = 0; i < wr->num_sge; i++) {
+		const struct smartnic_provider_sge *sge = &wr->sg_list[i];
+		struct smartnic_provider_mr *mr;
+		uint64_t offset;
+
+		if (sge->length == 0) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		for (mr = ctx->mr_list; mr; mr = mr->next) {
+			if (mr->magic == SMARTNIC_PROVIDER_OBJECT_MAGIC_MR &&
+			    mr->pd == qp->pd && mr->lkey == sge->lkey)
+				break;
+		}
+		if (!mr || !(mr->access_flags & SMARTNIC_PROVIDER_ACCESS_LOCAL_WRITE)) {
+			errno = EACCES;
+			return -1;
+		}
+
+		if (sge->addr < (uint64_t)(uintptr_t)mr->addr) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		offset = sge->addr - (uint64_t)(uintptr_t)mr->addr;
+		if (offset > mr->length || sge->length > mr->length - offset) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		total += sge->length;
+		if (total > UINT32_MAX) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+	}
+
+	*total_len = (uint32_t)total;
+	return 0;
+}
+
+static void smartnic_provider_fill_recv_wqe(struct smartnic_provider_qp *qp,
+					    const struct smartnic_provider_recv_wr *wr,
+					    uint32_t total_len,
+					    struct smartnic_provider_wqe *wqe)
+{
+	memset(wqe, 0, sizeof(*wqe));
+	wqe->ctrl.opcode = SMARTNIC_PROVIDER_WC_RECV;
+	wqe->ctrl.wr_id = wr->wr_id;
+	wqe->ctrl.qpn = qp->qpn;
+	wqe->ctrl.num_sge = wr->num_sge;
+	wqe->ctrl.total_len = total_len;
+	if (wr->num_sge)
+		memcpy(wqe->sge, wr->sg_list,
+		       wr->num_sge * sizeof(struct smartnic_provider_sge));
 }
 
 static int smartnic_provider_validate_node(const char *path,
@@ -2361,6 +2496,132 @@ int smartnic_provider_build_send_wqe(struct smartnic_provider_qp *qp,
 	if (wqe_out)
 		*wqe_out = wqe;
 
+	pthread_mutex_unlock(&qp->lock);
+	pthread_mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+int smartnic_provider_post_send(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_send_wr *wr_list,
+				const struct smartnic_provider_send_wr **bad_wr)
+{
+	const struct smartnic_provider_send_wr *wr;
+	uint32_t posted = 0;
+
+	if (bad_wr)
+		*bad_wr = NULL;
+	if (!qp || qp->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_QP || !qp->ctx) {
+		if (bad_wr)
+			*bad_wr = wr_list;
+		errno = EINVAL;
+		return -1;
+	}
+
+	for (wr = wr_list; wr; wr = wr->next) {
+		uint32_t old_pi = qp->sq_producer_index;
+
+		if (smartnic_provider_build_send_wqe(qp, wr, NULL) < 0) {
+			if (bad_wr)
+				*bad_wr = wr;
+			if (posted)
+				smartnic_provider_write_doorbell(qp,
+								 SMARTNIC_PROVIDER_DB_TYPE_SQ,
+								 qp->sq_producer_index,
+								 posted);
+			return posted ? 0 : -1;
+		}
+		if (qp->sq_depth)
+			qp->sq_opcode[old_pi] = wr->opcode;
+		if (qp->sq_depth)
+			qp->sq_signaled[old_pi] =
+				(wr->send_flags & SMARTNIC_PROVIDER_SEND_SIGNALED) ? 1 : 0;
+		posted++;
+	}
+
+	if (posted)
+		smartnic_provider_write_doorbell(qp, SMARTNIC_PROVIDER_DB_TYPE_SQ,
+						 qp->sq_producer_index, posted);
+
+	return 0;
+}
+
+int smartnic_provider_post_recv(struct smartnic_provider_qp *qp,
+				const struct smartnic_provider_recv_wr *wr_list,
+				const struct smartnic_provider_recv_wr **bad_wr)
+{
+	struct smartnic_provider_context *ctx;
+	const struct smartnic_provider_recv_wr *wr;
+	uint32_t posted = 0;
+
+	if (bad_wr)
+		*bad_wr = NULL;
+	if (!qp || qp->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_QP || !qp->ctx) {
+		if (bad_wr)
+			*bad_wr = wr_list;
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = qp->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_qp_is_linked_locked(ctx, qp)) {
+		pthread_mutex_unlock(&ctx->lock);
+		if (bad_wr)
+			*bad_wr = wr_list;
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&qp->lock);
+	for (wr = wr_list; wr; wr = wr->next) {
+		struct smartnic_provider_wqe wqe;
+		uint32_t total_len = 0;
+		uint32_t old_pi = qp->rq_producer_index;
+		uint32_t next_pi;
+
+		if (smartnic_provider_validate_recv_state(qp) < 0 ||
+		    smartnic_provider_validate_recv_sges(ctx, qp, wr, &total_len) < 0) {
+			if (bad_wr)
+				*bad_wr = wr;
+			pthread_mutex_unlock(&qp->lock);
+			pthread_mutex_unlock(&ctx->lock);
+			return posted ? 0 : -1;
+		}
+
+		if (qp->rq_depth == 0 || !qp->rq_ring || !qp->rq_wr_id) {
+			if (bad_wr)
+				*bad_wr = wr;
+			pthread_mutex_unlock(&qp->lock);
+			pthread_mutex_unlock(&ctx->lock);
+			errno = EINVAL;
+			return posted ? 0 : -1;
+		}
+
+		next_pi = old_pi + 1;
+		if (next_pi >= qp->rq_depth)
+			next_pi = 0;
+		if (next_pi == qp->rq_consumer_index) {
+			if (bad_wr)
+				*bad_wr = wr;
+			pthread_mutex_unlock(&qp->lock);
+			pthread_mutex_unlock(&ctx->lock);
+			errno = ENOSPC;
+			return posted ? 0 : -1;
+		}
+
+		smartnic_provider_fill_recv_wqe(qp, wr, total_len, &wqe);
+		qp->rq_ring[old_pi] = wqe;
+		qp->rq_wr_id[old_pi] = wr->wr_id;
+		qp->rq_producer_index = next_pi;
+		posted++;
+	}
+
+	if (posted)
+		smartnic_provider_write_doorbell(qp, SMARTNIC_PROVIDER_DB_TYPE_RQ,
+						 qp->rq_producer_index, posted);
 	pthread_mutex_unlock(&qp->lock);
 	pthread_mutex_unlock(&ctx->lock);
 	return 0;

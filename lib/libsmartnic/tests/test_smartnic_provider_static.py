@@ -56,6 +56,8 @@ def main() -> None:
         "struct smartnic_provider_wqe_ud",
         "struct smartnic_provider_wqe",
         "struct smartnic_provider_send_wr",
+        "struct smartnic_provider_recv_wr",
+        "struct smartnic_provider_doorbell_record",
         "struct smartnic_provider_pd",
         "struct smartnic_provider_cq",
         "struct smartnic_provider_qp",
@@ -86,6 +88,8 @@ def main() -> None:
         "smartnic_provider_create_ah",
         "smartnic_provider_destroy_ah",
         "smartnic_provider_build_send_wqe",
+        "smartnic_provider_post_send",
+        "smartnic_provider_post_recv",
         "SMARTNIC_PROVIDER_TRANSPORT_RC",
         "SMARTNIC_PROVIDER_TRANSPORT_UD",
         "SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET",
@@ -110,6 +114,8 @@ def main() -> None:
         "SMARTNIC_PROVIDER_MAX_WQE_SGE",
         "SMARTNIC_PROVIDER_WQE_INLINE_BYTES",
         "SMARTNIC_PROVIDER_WQE_ALIGNMENT",
+        "SMARTNIC_PROVIDER_DB_TYPE_SQ",
+        "SMARTNIC_PROVIDER_DB_TYPE_RQ",
         "SMARTNIC_PROVIDER_WR_SEND",
         "SMARTNIC_PROVIDER_WR_SEND_WITH_IMM",
         "SMARTNIC_PROVIDER_WR_RDMA_WRITE",
@@ -142,6 +148,14 @@ def main() -> None:
         "sq_wr_id",
         "sq_depth",
         "sq_wqe_stride",
+        "rq_ring",
+        "rq_wr_id",
+        "rq_depth",
+        "rq_wqe_stride",
+        "last_sq_doorbell",
+        "last_rq_doorbell",
+        "sq_doorbell_count",
+        "rq_doorbell_count",
         "armed",
         "solicited_only",
         "pd_count",
@@ -280,6 +294,21 @@ def main() -> None:
         "next_pi == qp->sq_consumer_index",
         "qp->sq_ring[qp->sq_producer_index] = wqe",
         "qp->sq_wr_id[qp->sq_producer_index] = wr->wr_id",
+        "smartnic_provider_wmb",
+        "__sync_synchronize()",
+        "smartnic_provider_write_doorbell",
+        "SMARTNIC_PROVIDER_DB_TYPE_SQ",
+        "SMARTNIC_PROVIDER_DB_TYPE_RQ",
+        "smartnic_provider_validate_recv_state",
+        "smartnic_provider_validate_recv_sges",
+        "smartnic_provider_fill_recv_wqe",
+        "qp->rq_ring[old_pi] = wqe",
+        "qp->rq_wr_id[old_pi] = wr->wr_id",
+        "smartnic_provider_post_send",
+        "smartnic_provider_post_recv",
+        "const struct smartnic_provider_send_wr **bad_wr",
+        "const struct smartnic_provider_recv_wr **bad_wr",
+        "return posted ? 0 : -1",
     ]:
         require(source, needle, f"provider source {needle}")
 
@@ -299,6 +328,7 @@ def main() -> None:
     require(tasks, "- [x] 13.6 Implement MR register/deregister", "13.6 task completion")
     require(tasks, "- [x] 13.7 Implement AH create/destroy", "13.7 task completion")
     require(tasks, "- [x] 13.8 Implement WQE builders", "13.8 task completion")
+    require(tasks, "- [x] 13.9 Implement post_send and post_recv", "13.9 task completion")
     print("smartnic provider static checks passed")
 
 

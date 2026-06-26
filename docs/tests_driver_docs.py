@@ -119,7 +119,7 @@ def main() -> None:
         "smartnic_provider_open",
         "smartnic_provider_close",
         "SMARTNIC_PROVIDER_DEV_DIR",
-        "13.8 后仍未实现的内容",
+        "13.9 后仍未实现的内容",
         "smartnic_provider_query_device",
         "smartnic_provider_query_port",
         "smartnic_provider_query_gid",
@@ -140,6 +140,8 @@ def main() -> None:
         "smartnic_provider_create_ah",
         "smartnic_provider_destroy_ah",
         "smartnic_provider_build_send_wqe",
+        "smartnic_provider_post_send",
+        "smartnic_provider_post_recv",
     ]:
         require(provider_doc, needle, f"userspace provider doc {needle}")
 

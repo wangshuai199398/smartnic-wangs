@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。13.8 添加了 Send/RDMA/UD WQE 构建 helper。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。13.8 添加了 Send/RDMA/UD WQE 构建 helper。13.9 添加了 post_send/post_recv 批量提交和 Doorbell memory barrier helper。
 
 ## 已实现的 API
 
@@ -56,6 +56,12 @@ int smartnic_provider_destroy_ah(struct smartnic_provider_ah *ah);
 int smartnic_provider_build_send_wqe(struct smartnic_provider_qp *qp,
                                      const struct smartnic_provider_send_wr *wr,
                                      struct smartnic_provider_wqe *wqe_out);
+int smartnic_provider_post_send(struct smartnic_provider_qp *qp,
+                                const struct smartnic_provider_send_wr *wr_list,
+                                const struct smartnic_provider_send_wr **bad_wr);
+int smartnic_provider_post_recv(struct smartnic_provider_qp *qp,
+                                const struct smartnic_provider_recv_wr *wr_list,
+                                const struct smartnic_provider_recv_wr **bad_wr);
 ```
 
 ## 设备发现
@@ -249,10 +255,20 @@ immediate data 通过 `htonl()` 编码为 network byte order，保证 Send with 
 
 13.8 只写入 QP 的 shadow SQ ring，保存 wr_id，并推进 provider-side producer index；不会批量 post，也不会写 Doorbell。若 SGE、lkey、AH、remote key、send flags 或 SQ 空间检查失败，builder 会返回错误且不会推进 producer index，这就是 13.9 post_send/doorbell 的 rollback 基础。
 
-## 13.8 后仍未实现的内容
+## post_send / post_recv
 
-- QP send/recv posting；
-- 快速路径 Doorbell 写入；
+`smartnic_provider_post_send()` 接收 `smartnic_provider_send_wr` 链表，按顺序调用 13.8 的 WQE builder。每个成功 WR 都会写入 QP shadow SQ ring，保存 `wr_id`、opcode 和 signaled metadata，并推进 SQ producer index。遇到第一个失败 WR 时，`bad_wr` 指向该 WR；已经成功构建的 WR 保留，并在返回前写一次 SQ Doorbell。
+
+`smartnic_provider_post_recv()` 接收 `smartnic_provider_recv_wr` 链表，校验 QP 状态、SGE 数量、lkey 和 MR 范围，并写入 RQ shadow ring。Recv SGE 必须引用带 `LOCAL_WRITE` 的 MR。成功批次只写一次 RQ Doorbell。
+
+SQ/RQ ring 使用 reserved-one-entry 策略避免覆盖未完成 WQE：`next_producer == consumer` 表示队列满。producer index 只对成功 WR 前进；当前失败 WR 不会写入 ring。空 WR 链是 no-op success。
+
+Doorbell helper 当前写入 provider-side `last_sq_doorbell` / `last_rq_doorbell` 记录，保留 QPN、queue type、producer index 和本批 count。真实 mmap/MMIO Doorbell 页会在后续 fast path 任务中接入。写 Doorbell 前调用 `__sync_synchronize()` 作为跨平台保守 write memory barrier，保证 WQE 和 metadata 对设备可见后再发布 producer index。x86 上这比普通 store-store ordering 更强；弱内存序架构需要保留该屏障或替换为平台专用 MMIO barrier。
+
+## 13.9 后仍未实现的内容
+
+- 真实 mmap Doorbell MMIO；
+- CQE parser 的完整 verbs work completion 转换；
 - libibverbs provider 注册。
 
 这些有意留给后续 13.x 任务。
