@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。
 
 ## 已实现的 API
 
@@ -27,6 +27,14 @@ int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
 int smartnic_provider_alloc_pd(struct smartnic_provider_context *ctx,
                                struct smartnic_provider_pd **pd);
 int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd);
+int smartnic_provider_create_cq(struct smartnic_provider_context *ctx, int cqe,
+                                struct smartnic_provider_cq **cq);
+int smartnic_provider_destroy_cq(struct smartnic_provider_cq *cq);
+int smartnic_provider_resize_cq(struct smartnic_provider_cq *cq, int cqe);
+int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
+                              struct smartnic_provider_wc *wc);
+int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
+                                    int solicited_only);
 ```
 
 ## 设备发现
@@ -99,9 +107,32 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 
 当前阶段只实现 PD 生命周期。真实 libibverbs provider glue、PD 关联的 CQ/QP/MR 子对象引用增加/减少，会在后续 13.x 任务补齐。
 
-## 13.3 后仍未实现的内容
+## CQ 生命周期和轮询
 
-- CQ 创建或轮询；
+`smartnic_provider_create_cq()` 会校验 context、ABI 和 CQ depth，然后通过 `SMARTNIC_CMD_CREATE_CQ` 创建 kernel CQ。返回的 CQN/kernel handle 会保存到 `struct smartnic_provider_cq`。provider 侧 CQ 对象包含：
+
+- parent context 指针；
+- CQ lock；
+- kernel CQ handle / CQN；
+- CQ depth；
+- producer/consumer index；
+- ring 指针和 ring size 占位字段；
+- `child_count` 和 `refcount`，供后续 QP 引用 CQ；
+- notification armed / solicited-only 状态；
+- context 内部链表指针。
+
+当前实现选择 kernel/mailbox command path 作为最小可验证路径，没有 mmap 真实 CQ ring。这样可以先稳定 CQ 对象生命周期和 completion 翻译接口，后续驱动暴露 CQ ring 后再把 `ring` 字段接到 mmap-backed CQ buffer。
+
+`smartnic_provider_destroy_cq()` 会检查 CQ 是否属于 parent context，并拒绝仍有 active QP/child 引用的 CQ。检查通过后发送 `SMARTNIC_CMD_DESTROY_CQ`，再从 context CQ 链表摘除并释放 provider 对象。
+
+`smartnic_provider_resize_cq()` 通过 `SMARTNIC_CMD_RESIZE_CQ` 请求 kernel resize。只有 kernel 命令成功后才更新 provider 侧 `cqe` 和 index 元数据。如果驱动或硬件不支持 resize，ioctl/mailbox 应返回清晰错误，provider 不会修改本地状态。
+
+`smartnic_provider_poll_cq()` 当前通过 `SMARTNIC_CMD_POLL_CQ` 逐个拉取 completion。mailbox 返回的紧凑 CQE metadata 被翻译为 `struct smartnic_provider_wc`，包括 `wr_id`、`status`、`opcode`、`byte_len`、`qp_num`、`vendor_err`、`imm_data` 和 `wc_flags`。CQ 为空时返回 0；错误时返回负 errno；已经成功取到部分 completion 后遇到错误，则返回已取到的数量。
+
+`smartnic_provider_req_notify_cq()` 通过 `SMARTNIC_CMD_ARM_CQ` arm CQ，支持 next-completion 和 solicited-only 两种模式。当前 poll/notify race 策略是先由调用方 poll drain，再 arm，再按需重新 poll；后续正式 verbs glue 会把该顺序封装为 libibverbs 兼容语义。
+
+## 13.4 后仍未实现的内容
+
 - QP 创建或提交；
 - MR 注册；
 - AH 管理；

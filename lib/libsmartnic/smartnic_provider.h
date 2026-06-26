@@ -37,8 +37,26 @@ extern "C" {
 #define SMARTNIC_CMD_QUERY_DEVICE 0x0001
 #define SMARTNIC_CMD_ALLOC_PD     0x0101
 #define SMARTNIC_CMD_DEALLOC_PD   0x0102
+#define SMARTNIC_CMD_CREATE_CQ    0x0201
+#define SMARTNIC_CMD_DESTROY_CQ   0x0202
+#define SMARTNIC_CMD_RESIZE_CQ    0x0203
+#define SMARTNIC_CMD_POLL_CQ      0x0204
+#define SMARTNIC_CMD_ARM_CQ       0x0205
 
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_PD 0x534e5044U
+#define SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ 0x534e4345U
+
+#define SMARTNIC_PROVIDER_WC_FLAG_IMM 0x00000001U
+
+#define SMARTNIC_PROVIDER_CQ_NOTIFY_NEXT      0
+#define SMARTNIC_PROVIDER_CQ_NOTIFY_SOLICITED 1
+
+#define SMARTNIC_PROVIDER_CQE_VALID_BIT 0x80000000U
+#define SMARTNIC_PROVIDER_CQE_STATUS_MASK 0x000000ffU
+#define SMARTNIC_PROVIDER_CQE_OPCODE_SHIFT 8U
+#define SMARTNIC_PROVIDER_CQE_OPCODE_MASK 0x0000ff00U
+#define SMARTNIC_PROVIDER_CQE_FLAGS_SHIFT 16U
+#define SMARTNIC_PROVIDER_CQE_FLAGS_MASK 0x00ff0000U
 
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
@@ -77,6 +95,33 @@ struct smartnic_provider_gid {
 	uint8_t raw[SMARTNIC_PROVIDER_GID_LEN];
 };
 
+enum smartnic_provider_wc_status {
+	SMARTNIC_PROVIDER_WC_SUCCESS = 0,
+	SMARTNIC_PROVIDER_WC_LOC_LEN_ERR = 1,
+	SMARTNIC_PROVIDER_WC_LOC_PROT_ERR = 2,
+	SMARTNIC_PROVIDER_WC_WR_FLUSH_ERR = 5,
+	SMARTNIC_PROVIDER_WC_GENERAL_ERR = 255,
+};
+
+enum smartnic_provider_wc_opcode {
+	SMARTNIC_PROVIDER_WC_SEND = 0,
+	SMARTNIC_PROVIDER_WC_RECV = 1,
+	SMARTNIC_PROVIDER_WC_RDMA_WRITE = 2,
+	SMARTNIC_PROVIDER_WC_RDMA_READ = 3,
+	SMARTNIC_PROVIDER_WC_RECV_RDMA_WITH_IMM = 4,
+};
+
+struct smartnic_provider_wc {
+	uint64_t wr_id;
+	uint32_t status;
+	uint32_t opcode;
+	uint32_t byte_len;
+	uint32_t qp_num;
+	uint32_t vendor_err;
+	uint32_t imm_data;
+	uint32_t wc_flags;
+};
+
 struct smartnic_provider_device {
 	char name[SMARTNIC_PROVIDER_MAX_NAME];
 	char node_path[SMARTNIC_PROVIDER_MAX_PATH];
@@ -103,6 +148,7 @@ struct smartnic_provider_context {
 	unsigned int mr_count;
 	unsigned int ah_count;
 	struct smartnic_provider_pd *pd_list;
+	struct smartnic_provider_cq *cq_list;
 	int closed;
 };
 
@@ -114,6 +160,24 @@ struct smartnic_provider_pd {
 	unsigned int child_count;
 	unsigned int refcount;
 	struct smartnic_provider_pd *next;
+};
+
+struct smartnic_provider_cq {
+	uint32_t magic;
+	struct smartnic_provider_context *ctx;
+	pthread_mutex_t lock;
+	uint32_t cqn;
+	uint32_t kernel_handle;
+	int cqe;
+	uint32_t producer_index;
+	uint32_t consumer_index;
+	void *ring;
+	size_t ring_size;
+	unsigned int child_count;
+	unsigned int refcount;
+	int armed;
+	int solicited_only;
+	struct smartnic_provider_cq *next;
 };
 
 int smartnic_provider_discover(struct smartnic_provider_device **devices,
@@ -141,6 +205,15 @@ int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
 int smartnic_provider_alloc_pd(struct smartnic_provider_context *ctx,
 			       struct smartnic_provider_pd **pd);
 int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd);
+
+int smartnic_provider_create_cq(struct smartnic_provider_context *ctx, int cqe,
+				struct smartnic_provider_cq **cq);
+int smartnic_provider_destroy_cq(struct smartnic_provider_cq *cq);
+int smartnic_provider_resize_cq(struct smartnic_provider_cq *cq, int cqe);
+int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
+			      struct smartnic_provider_wc *wc);
+int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
+				    int solicited_only);
 
 const char *smartnic_provider_strerror(int err);
 

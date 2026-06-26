@@ -2,9 +2,8 @@
 /*
  * SmartNIC userspace provider discovery and context lifetime.
  *
- * This file intentionally stops before PD/CQ/QP/MR allocation. It gives later
- * verbs-style code a stable context object with an fd, cached device metadata,
- * locks, and child-object counters.
+ * This file implements discovery, context, query, PD, and CQ provider
+ * primitives. Later 13.x tasks layer QP/MR/AH and fast-path verbs APIs on top.
  */
 
 #include "smartnic_provider.h"
@@ -199,6 +198,114 @@ static int smartnic_provider_pd_is_linked_locked(struct smartnic_provider_contex
 	}
 
 	return 0;
+}
+
+static struct smartnic_provider_cq *
+smartnic_provider_cq_alloc_object(struct smartnic_provider_context *ctx,
+				  uint32_t cqn, int cqe)
+{
+	struct smartnic_provider_cq *cq;
+
+	cq = calloc(1, sizeof(*cq));
+	if (!cq)
+		return NULL;
+
+	cq->magic = SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ;
+	cq->ctx = ctx;
+	cq->cqn = cqn;
+	cq->kernel_handle = cqn;
+	cq->cqe = cqe;
+	cq->refcount = 1;
+
+	if (pthread_mutex_init(&cq->lock, NULL) != 0) {
+		free(cq);
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	return cq;
+}
+
+static void smartnic_provider_cq_free_object(struct smartnic_provider_cq *cq)
+{
+	if (!cq)
+		return;
+
+	pthread_mutex_destroy(&cq->lock);
+	free(cq->ring);
+	free(cq);
+}
+
+static void smartnic_provider_cq_link_locked(struct smartnic_provider_context *ctx,
+					     struct smartnic_provider_cq *cq)
+{
+	cq->next = ctx->cq_list;
+	ctx->cq_list = cq;
+	ctx->cq_count++;
+}
+
+static int smartnic_provider_cq_unlink_locked(struct smartnic_provider_context *ctx,
+					      struct smartnic_provider_cq *cq)
+{
+	struct smartnic_provider_cq **cursor = &ctx->cq_list;
+
+	while (*cursor) {
+		if (*cursor == cq) {
+			*cursor = cq->next;
+			cq->next = NULL;
+			if (ctx->cq_count)
+				ctx->cq_count--;
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int smartnic_provider_cq_is_linked_locked(struct smartnic_provider_context *ctx,
+						 const struct smartnic_provider_cq *cq)
+{
+	const struct smartnic_provider_cq *cursor;
+
+	for (cursor = ctx->cq_list; cursor; cursor = cursor->next) {
+		if (cursor == cq)
+			return 1;
+	}
+
+	return 0;
+}
+
+static int smartnic_provider_validate_cqe_count(int cqe)
+{
+	if (cqe <= 0 || (uint32_t)cqe > SMARTNIC_PROVIDER_DEFAULT_MAX_WR) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static void smartnic_provider_translate_wc(const uint32_t data[4],
+					   uint32_t consumer_index,
+					   struct smartnic_provider_wc *wc)
+{
+	uint32_t meta = data[0];
+
+	memset(wc, 0, sizeof(*wc));
+	wc->wr_id = consumer_index;
+	wc->status = meta & SMARTNIC_PROVIDER_CQE_STATUS_MASK;
+	wc->opcode = (meta & SMARTNIC_PROVIDER_CQE_OPCODE_MASK) >>
+		     SMARTNIC_PROVIDER_CQE_OPCODE_SHIFT;
+	wc->wc_flags = (meta & SMARTNIC_PROVIDER_CQE_FLAGS_MASK) >>
+		       SMARTNIC_PROVIDER_CQE_FLAGS_SHIFT;
+	wc->byte_len = data[1];
+	wc->qp_num = data[2];
+	if (wc->wc_flags & SMARTNIC_PROVIDER_WC_FLAG_IMM)
+		wc->imm_data = data[3];
+	else
+		wc->vendor_err = data[3];
 }
 
 static int smartnic_provider_validate_node(const char *path,
@@ -733,6 +840,261 @@ int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd)
 	pthread_mutex_unlock(&ctx->lock);
 
 	free(pd);
+	return 0;
+}
+
+int smartnic_provider_create_cq(struct smartnic_provider_context *ctx, int cqe,
+				struct smartnic_provider_cq **cq)
+{
+	struct smartnic_provider_cq *new_cq;
+	uint32_t in[1];
+	uint32_t out[1] = { 0 };
+
+	if (!cq) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*cq = NULL;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	if (smartnic_provider_validate_cqe_count(cqe) < 0)
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (ctx->cq_count >= SMARTNIC_PROVIDER_DEFAULT_MAX_CQ) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = ENOSPC;
+		return -1;
+	}
+
+	in[0] = (uint32_t)cqe;
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_CREATE_CQ,
+					   in, 1, out, 1) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (out[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EIO;
+		return -1;
+	}
+
+	new_cq = smartnic_provider_cq_alloc_object(ctx, out[0], cqe);
+	if (!new_cq) {
+		uint32_t destroy_in[1] = { out[0] };
+		int saved_errno = errno;
+
+		(void)smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_CQ,
+						     destroy_in, 1, NULL, 0);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = saved_errno;
+		return -1;
+	}
+
+	smartnic_provider_cq_link_locked(ctx, new_cq);
+	pthread_mutex_unlock(&ctx->lock);
+
+	*cq = new_cq;
+	return 0;
+}
+
+int smartnic_provider_destroy_cq(struct smartnic_provider_cq *cq)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[1];
+
+	if (!cq || cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ || !cq->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = cq->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_cq_is_linked_locked(ctx, cq)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&cq->lock);
+	if (cq->child_count != 0 || cq->refcount > 1) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBUSY;
+		return -1;
+	}
+
+	in[0] = cq->kernel_handle;
+	if (in[0] == 0) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DESTROY_CQ,
+					   in, 1, NULL, 0) < 0) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (smartnic_provider_cq_unlink_locked(ctx, cq) < 0) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	cq->magic = 0;
+	cq->ctx = NULL;
+	cq->kernel_handle = 0;
+	pthread_mutex_unlock(&cq->lock);
+	pthread_mutex_unlock(&ctx->lock);
+
+	smartnic_provider_cq_free_object(cq);
+	return 0;
+}
+
+int smartnic_provider_resize_cq(struct smartnic_provider_cq *cq, int cqe)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[2];
+
+	if (!cq || cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ || !cq->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_validate_cqe_count(cqe) < 0)
+		return -1;
+
+	ctx = cq->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_cq_is_linked_locked(ctx, cq)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&cq->lock);
+	in[0] = cq->kernel_handle;
+	in[1] = (uint32_t)cqe;
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_RESIZE_CQ,
+					   in, 2, NULL, 0) < 0) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	cq->cqe = cqe;
+	if (cq->consumer_index >= (uint32_t)cqe)
+		cq->consumer_index = 0;
+	if (cq->producer_index >= (uint32_t)cqe)
+		cq->producer_index = 0;
+	pthread_mutex_unlock(&cq->lock);
+	pthread_mutex_unlock(&ctx->lock);
+	return 0;
+}
+
+int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
+			      struct smartnic_provider_wc *wc)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[2];
+	uint32_t out[4];
+	int polled = 0;
+
+	if (!cq || cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ || !cq->ctx ||
+	    num_entries < 0 || (num_entries > 0 && !wc)) {
+		errno = EINVAL;
+		return -EINVAL;
+	}
+
+	if (num_entries == 0)
+		return 0;
+
+	ctx = cq->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -errno;
+
+	pthread_mutex_lock(&cq->lock);
+	while (polled < num_entries) {
+		memset(out, 0, sizeof(out));
+		in[0] = cq->kernel_handle;
+		in[1] = cq->consumer_index;
+
+		if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_POLL_CQ,
+						   in, 2, out, 4) < 0) {
+			int err = errno;
+
+			pthread_mutex_unlock(&cq->lock);
+			return polled ? polled : -err;
+		}
+
+		if ((out[0] & SMARTNIC_PROVIDER_CQE_VALID_BIT) == 0)
+			break;
+
+		smartnic_provider_translate_wc(out, cq->consumer_index,
+					       &wc[polled]);
+		cq->consumer_index++;
+		if (cq->consumer_index >= (uint32_t)cq->cqe)
+			cq->consumer_index = 0;
+		polled++;
+	}
+	pthread_mutex_unlock(&cq->lock);
+
+	return polled;
+}
+
+int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
+				    int solicited_only)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[2];
+
+	if (!cq || cq->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_CQ || !cq->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = cq->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_cq_is_linked_locked(ctx, cq)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&cq->lock);
+	in[0] = cq->kernel_handle;
+	in[1] = solicited_only ? SMARTNIC_PROVIDER_CQ_NOTIFY_SOLICITED :
+				 SMARTNIC_PROVIDER_CQ_NOTIFY_NEXT;
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_ARM_CQ,
+					   in, 2, NULL, 0) < 0) {
+		pthread_mutex_unlock(&cq->lock);
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	cq->armed = 1;
+	cq->solicited_only = solicited_only ? 1 : 0;
+	pthread_mutex_unlock(&cq->lock);
+	pthread_mutex_unlock(&ctx->lock);
 	return 0;
 }
 

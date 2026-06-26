@@ -128,7 +128,7 @@
 - [x] 13.1 Implement device discovery and context open/close APIs.
 - [x] 13.2 Implement query_device, query_port, query_gid, and query_pkey APIs.
 - [x] 13.3 Implement PD alloc/dealloc APIs.
-- [ ] 13.4 Implement CQ create/destroy/resize, poll_cq, and req_notify_cq APIs.
+- [x] 13.4 Implement CQ create/destroy/resize, poll_cq, and req_notify_cq APIs.
 - [ ] 13.5 Implement QP create/modify/query/destroy APIs.
 - [ ] 13.6 Implement MR register/deregister APIs.
 - [ ] 13.7 Implement AH create/destroy APIs for UD.
