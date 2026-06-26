@@ -21,6 +21,7 @@ def main() -> None:
     release = read(ROOT / "docs/driver-release-checklist.md")
     uapi = read(ROOT / "docs/uapi.md")
     troubleshooting = read(ROOT / "docs/troubleshooting.md")
+    provider_doc = read(ROOT / "docs/userspace-provider.md")
     ex_ioctl = read(ROOT / "examples/smartnic_ioctl_example.c")
     ex_poll = read(ROOT / "examples/smartnic_poll_example.c")
     ex_flow = read(ROOT / "examples/smartnic_user_flow_example.c")
@@ -88,9 +89,9 @@ def main() -> None:
     for needle in [
         "make driver-release-check",
         "CONFIG_SMARTNIC_KUNIT",
-        "Load/Unload Smoke Test",
-        "Resource Lifecycle Checklist",
-        "UAPI Consistency Checklist",
+        "加载/卸载烟雾测试",
+        "资源生命周期检查清单",
+        "UAPI 一致性检查清单",
         "SMARTNIC_IOCTL_MBOX_EXEC",
         "POLLERR | POLLHUP",
     ]:
@@ -112,6 +113,15 @@ def main() -> None:
     require(tasks, "- [x] 12.8 Implement driver documentation", "12.8 task completion")
     require(tasks, "- [x] 12.11 Implement Linux SmartNIC driver documentation", "12.11 task completion")
     require(tasks, "- [x] 12.12 Finalize Linux SmartNIC driver integration", "12.12 task completion")
+
+    for needle in [
+        "smartnic_provider_discover",
+        "smartnic_provider_open",
+        "smartnic_provider_close",
+        "SMARTNIC_PROVIDER_DEV_DIR",
+        "Not Implemented In 13.1",
+    ]:
+        require(provider_doc, needle, f"userspace provider doc {needle}")
 
     print("smartnic driver documentation checks passed")
 

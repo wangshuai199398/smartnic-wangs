@@ -12,9 +12,19 @@ LIB_OBJS := libsmartnic.o
 BIN := smartnicctl
 LIB := libsmartnic.a
 
-.PHONY: all clean test examples install
+.PHONY: all build clean test examples install
 
-all: $(LIB) $(BIN)
+all:
+	@if printf '#include <linux/ioctl.h>\n#include <linux/types.h>\nint main(void){return 0;}\n' | \
+		$(CC) -x c - -o /tmp/smartnic-tools-uapi-check.$$ >/dev/null 2>&1; then \
+		rm -f /tmp/smartnic-tools-uapi-check.$$; \
+		$(MAKE) build; \
+	else \
+		rm -f /tmp/smartnic-tools-uapi-check.$$; \
+		echo "[tools] Linux UAPI headers not available; tools build skipped."; \
+	fi
+
+build: $(LIB) $(BIN)
 
 $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
@@ -26,8 +36,12 @@ $(BIN): smartnicctl.o $(LIB)
 	$(CC) $(CPPFLAGS) -I. -I$(UAPI_INC) $(CFLAGS) -c -o $@ $<
 
 test: all
-	@./smartnicctl --help >/dev/null
-	@python3 tests/test_smartnicctl.py
+	@if [ -x ./smartnicctl ]; then \
+		./smartnicctl --help >/dev/null; \
+		python3 tests/test_smartnicctl.py; \
+	else \
+		echo "[tools] smartnicctl not built; Linux-only tool tests skipped."; \
+	fi
 
 examples:
 	@$(MAKE) -C ../examples
