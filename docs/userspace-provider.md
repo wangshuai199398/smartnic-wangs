@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。
 
 ## 已实现的 API
 
@@ -24,6 +24,9 @@ int smartnic_provider_query_gid(struct smartnic_provider_context *ctx,
 int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
                                  uint8_t port_num, uint32_t index,
                                  uint16_t *pkey);
+int smartnic_provider_alloc_pd(struct smartnic_provider_context *ctx,
+                               struct smartnic_provider_pd **pd);
+int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd);
 ```
 
 ## 设备发现
@@ -81,9 +84,23 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 - 输出指针不能为 `NULL`；
 - 端口号和表 index 必须在范围内。
 
-## 13.2 后仍未实现的内容
+## PD 生命周期
 
-- PD 分配；
+`smartnic_provider_alloc_pd()` 使用现有 `SMARTNIC_IOCTL_MBOX_EXEC` 路径向内核驱动发送 `SMARTNIC_CMD_ALLOC_PD`，驱动返回的 PD number/handle 保存在 `struct smartnic_provider_pd` 中。provider 侧 PD 对象包含：
+
+- parent context 指针；
+- kernel PD handle / PD number；
+- `child_count` 和 `refcount`，供后续 CQ/QP/MR 绑定到 PD 时做生命周期保护；
+- context 内部链表指针，用于 close 时检测仍未释放的 PD。
+
+分配成功后，PD 会挂入 context 的 PD 链表，并增加 `pd_count`。如果 provider 无法分配用户态 PD 对象，会尝试用 `SMARTNIC_CMD_DEALLOC_PD` 回滚已经创建的 kernel PD。
+
+`smartnic_provider_dealloc_pd()` 会先验证 PD magic、parent context 和链表归属，再检查 `child_count == 0` 且 `refcount <= 1`。如果仍有后续对象引用该 PD，返回 `EBUSY`，不会销毁 kernel PD。检查通过后，provider 发送 `SMARTNIC_CMD_DEALLOC_PD`，成功后从 context 链表摘除并释放用户态对象。
+
+当前阶段只实现 PD 生命周期。真实 libibverbs provider glue、PD 关联的 CQ/QP/MR 子对象引用增加/减少，会在后续 13.x 任务补齐。
+
+## 13.3 后仍未实现的内容
+
 - CQ 创建或轮询；
 - QP 创建或提交；
 - MR 注册；

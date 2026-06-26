@@ -35,6 +35,10 @@ extern "C" {
 #define SMARTNIC_PROVIDER_ENV_DEV_DIR "SMARTNIC_PROVIDER_DEV_DIR"
 
 #define SMARTNIC_CMD_QUERY_DEVICE 0x0001
+#define SMARTNIC_CMD_ALLOC_PD     0x0101
+#define SMARTNIC_CMD_DEALLOC_PD   0x0102
+
+#define SMARTNIC_PROVIDER_OBJECT_MAGIC_PD 0x534e5044U
 
 struct smartnic_provider_device_attr {
 	uint32_t abi_version;
@@ -98,7 +102,18 @@ struct smartnic_provider_context {
 	unsigned int qp_count;
 	unsigned int mr_count;
 	unsigned int ah_count;
+	struct smartnic_provider_pd *pd_list;
 	int closed;
+};
+
+struct smartnic_provider_pd {
+	uint32_t magic;
+	struct smartnic_provider_context *ctx;
+	uint32_t pdn;
+	uint32_t kernel_handle;
+	unsigned int child_count;
+	unsigned int refcount;
+	struct smartnic_provider_pd *next;
 };
 
 int smartnic_provider_discover(struct smartnic_provider_device **devices,
@@ -122,6 +137,10 @@ int smartnic_provider_query_gid(struct smartnic_provider_context *ctx,
 int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
 				 uint8_t port_num, uint32_t index,
 				 uint16_t *pkey);
+
+int smartnic_provider_alloc_pd(struct smartnic_provider_context *ctx,
+			       struct smartnic_provider_pd **pd);
+int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd);
 
 const char *smartnic_provider_strerror(int err);
 

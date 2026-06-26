@@ -83,6 +83,38 @@ static int smartnic_provider_mailbox_query(int fd,
 	return 0;
 }
 
+static int smartnic_provider_mailbox_exec(struct smartnic_provider_context *ctx,
+					  uint16_t opcode, const uint32_t *in,
+					  size_t in_dwords, uint32_t *out,
+					  size_t out_dwords)
+{
+	struct smartnic_ioctl_mbox req;
+	size_t i;
+
+	if (!ctx || in_dwords > SMARTNIC_IOCTL_MAX_DATA_DWORDS ||
+	    out_dwords > SMARTNIC_IOCTL_MAX_DATA_DWORDS) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	memset(&req, 0, sizeof(req));
+	req.struct_size = sizeof(req);
+	req.opcode = opcode;
+	req.in_len = in_dwords * sizeof(uint32_t);
+	req.out_len = out_dwords * sizeof(uint32_t);
+
+	for (i = 0; i < in_dwords; i++)
+		req.data[i] = in[i];
+
+	if (ioctl(ctx->fd, SMARTNIC_IOCTL_MBOX_EXEC, &req) < 0)
+		return -1;
+
+	for (i = 0; i < out_dwords; i++)
+		out[i] = req.data[i];
+
+	return 0;
+}
+
 static int smartnic_provider_context_is_valid(struct smartnic_provider_context *ctx)
 {
 	if (!ctx) {
@@ -105,6 +137,65 @@ static int smartnic_provider_validate_abi(struct smartnic_provider_context *ctx)
 	if (ctx->abi_version != SMARTNIC_PROVIDER_ABI_VERSION) {
 		errno = EPROTO;
 		return -1;
+	}
+
+	return 0;
+}
+
+static struct smartnic_provider_pd *
+smartnic_provider_pd_alloc_object(struct smartnic_provider_context *ctx,
+				  uint32_t pdn)
+{
+	struct smartnic_provider_pd *pd;
+
+	pd = calloc(1, sizeof(*pd));
+	if (!pd)
+		return NULL;
+
+	pd->magic = SMARTNIC_PROVIDER_OBJECT_MAGIC_PD;
+	pd->ctx = ctx;
+	pd->pdn = pdn;
+	pd->kernel_handle = pdn;
+	pd->refcount = 1;
+	return pd;
+}
+
+static void smartnic_provider_pd_link_locked(struct smartnic_provider_context *ctx,
+					     struct smartnic_provider_pd *pd)
+{
+	pd->next = ctx->pd_list;
+	ctx->pd_list = pd;
+	ctx->pd_count++;
+}
+
+static int smartnic_provider_pd_unlink_locked(struct smartnic_provider_context *ctx,
+					      struct smartnic_provider_pd *pd)
+{
+	struct smartnic_provider_pd **cursor = &ctx->pd_list;
+
+	while (*cursor) {
+		if (*cursor == pd) {
+			*cursor = pd->next;
+			pd->next = NULL;
+			if (ctx->pd_count)
+				ctx->pd_count--;
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int smartnic_provider_pd_is_linked_locked(struct smartnic_provider_context *ctx,
+						 const struct smartnic_provider_pd *pd)
+{
+	const struct smartnic_provider_pd *cursor;
+
+	for (cursor = ctx->pd_list; cursor; cursor = cursor->next) {
+		if (cursor == pd)
+			return 1;
 	}
 
 	return 0;
@@ -533,6 +624,116 @@ int smartnic_provider_query_pkey(struct smartnic_provider_context *ctx,
 		return -1;
 
 	return smartnic_provider_get_pkey(port_num, index, pkey);
+}
+
+int smartnic_provider_alloc_pd(struct smartnic_provider_context *ctx,
+			       struct smartnic_provider_pd **pd)
+{
+	struct smartnic_provider_pd *new_pd;
+	uint32_t out[1] = { 0 };
+
+	if (!pd) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	*pd = NULL;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	if (smartnic_provider_validate_abi(ctx) < 0)
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (ctx->pd_count >= SMARTNIC_PROVIDER_DEFAULT_MAX_PD) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = ENOSPC;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_ALLOC_PD,
+					   NULL, 0, out, 1) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (out[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EIO;
+		return -1;
+	}
+
+	new_pd = smartnic_provider_pd_alloc_object(ctx, out[0]);
+	if (!new_pd) {
+		uint32_t destroy_in[1] = { out[0] };
+		int saved_errno = errno;
+
+		(void)smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DEALLOC_PD,
+						     destroy_in, 1, NULL, 0);
+		pthread_mutex_unlock(&ctx->lock);
+		errno = saved_errno;
+		return -1;
+	}
+
+	smartnic_provider_pd_link_locked(ctx, new_pd);
+	pthread_mutex_unlock(&ctx->lock);
+
+	*pd = new_pd;
+	return 0;
+}
+
+int smartnic_provider_dealloc_pd(struct smartnic_provider_pd *pd)
+{
+	struct smartnic_provider_context *ctx;
+	uint32_t in[1];
+
+	if (!pd || pd->magic != SMARTNIC_PROVIDER_OBJECT_MAGIC_PD || !pd->ctx) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = pd->ctx;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!smartnic_provider_pd_is_linked_locked(ctx, pd)) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (pd->child_count != 0 || pd->refcount > 1) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EBUSY;
+		return -1;
+	}
+
+	in[0] = pd->kernel_handle;
+	if (in[0] == 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (smartnic_provider_mailbox_exec(ctx, SMARTNIC_CMD_DEALLOC_PD,
+					   in, 1, NULL, 0) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	if (smartnic_provider_pd_unlink_locked(ctx, pd) < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		return -1;
+	}
+
+	pd->magic = 0;
+	pd->ctx = NULL;
+	pd->kernel_handle = 0;
+	pthread_mutex_unlock(&ctx->lock);
+
+	free(pd);
+	return 0;
 }
 
 const char *smartnic_provider_strerror(int err)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static checks for the 13.1 SmartNIC userspace provider context API."""
+"""Static checks for the 13.x SmartNIC userspace provider API."""
 
 from pathlib import Path
 
@@ -26,11 +26,14 @@ def main() -> None:
         "SMARTNIC_PROVIDER_ABI_VERSION",
         "SMARTNIC_PROVIDER_MAX_DEVICES",
         "SMARTNIC_PROVIDER_ENV_DEV_DIR",
+        "SMARTNIC_CMD_ALLOC_PD",
+        "SMARTNIC_CMD_DEALLOC_PD",
         "struct smartnic_provider_device",
         "struct smartnic_provider_context",
         "struct smartnic_provider_device_attr",
         "struct smartnic_provider_port_attr",
         "struct smartnic_provider_gid",
+        "struct smartnic_provider_pd",
         "smartnic_provider_discover",
         "smartnic_provider_free_devices",
         "smartnic_provider_open",
@@ -40,11 +43,18 @@ def main() -> None:
         "smartnic_provider_query_port",
         "smartnic_provider_query_gid",
         "smartnic_provider_query_pkey",
+        "smartnic_provider_alloc_pd",
+        "smartnic_provider_dealloc_pd",
         "SMARTNIC_PROVIDER_TRANSPORT_RC",
         "SMARTNIC_PROVIDER_TRANSPORT_UD",
         "SMARTNIC_PROVIDER_LINK_LAYER_ETHERNET",
         "SMARTNIC_PROVIDER_GID_TABLE_LEN",
         "SMARTNIC_PROVIDER_PKEY_TABLE_LEN",
+        "SMARTNIC_PROVIDER_OBJECT_MAGIC_PD",
+        "kernel_handle",
+        "child_count",
+        "refcount",
+        "pd_list",
         "pd_count",
         "cq_count",
         "qp_count",
@@ -61,10 +71,14 @@ def main() -> None:
         "S_ISCHR",
         "SMARTNIC_IOCTL_MBOX_EXEC",
         "SMARTNIC_CMD_QUERY_DEVICE",
+        "SMARTNIC_CMD_ALLOC_PD",
+        "SMARTNIC_CMD_DEALLOC_PD",
+        "smartnic_provider_mailbox_exec",
         "O_RDWR | O_CLOEXEC",
         "pthread_mutex_init",
         "pthread_mutex_lock(&ctx->lock)",
         "errno = EBUSY",
+        "errno = ENOSPC",
         "errno = EBADF",
         "close(fd)",
         "pthread_mutex_destroy",
@@ -83,6 +97,13 @@ def main() -> None:
         "SMARTNIC_PROVIDER_DEFAULT_MAX_SGE",
         "SMARTNIC_PROVIDER_DEFAULT_MAX_WR",
         "errno = EPROTO",
+        "smartnic_provider_pd_alloc_object",
+        "smartnic_provider_pd_link_locked",
+        "smartnic_provider_pd_unlink_locked",
+        "smartnic_provider_pd_is_linked_locked",
+        "pd->child_count != 0",
+        "pd->refcount > 1",
+        "out[0] == 0",
     ]:
         require(source, needle, f"provider source {needle}")
 
@@ -96,6 +117,7 @@ def main() -> None:
 
     require(tasks, "- [x] 13.1 Implement device discovery", "13.1 task completion")
     require(tasks, "- [x] 13.2 Implement query_device", "13.2 task completion")
+    require(tasks, "- [x] 13.3 Implement PD alloc/dealloc", "13.3 task completion")
     print("smartnic provider static checks passed")
 
 
