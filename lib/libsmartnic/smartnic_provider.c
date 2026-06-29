@@ -142,6 +142,39 @@ static int smartnic_provider_validate_abi(struct smartnic_provider_context *ctx)
 	return 0;
 }
 
+static void smartnic_provider_async_event_free_list(
+	struct smartnic_provider_async_event_node *node)
+{
+	while (node) {
+		struct smartnic_provider_async_event_node *next = node->next;
+
+		free(node);
+		node = next;
+	}
+}
+
+static int smartnic_provider_async_event_element_valid(
+	const struct smartnic_provider_async_event *event)
+{
+	if (!event)
+		return 0;
+
+	switch (event->element_type) {
+	case SMARTNIC_PROVIDER_ASYNC_ELEMENT_NONE:
+		return 1;
+	case SMARTNIC_PROVIDER_ASYNC_ELEMENT_CQ:
+		return event->element.cq != NULL;
+	case SMARTNIC_PROVIDER_ASYNC_ELEMENT_QP:
+		return event->element.qp != NULL;
+	case SMARTNIC_PROVIDER_ASYNC_ELEMENT_PORT:
+		return event->element.port_num != 0;
+	case SMARTNIC_PROVIDER_ASYNC_ELEMENT_DEVICE:
+		return event->element.ctx != NULL;
+	default:
+		return 0;
+	}
+}
+
 static struct smartnic_provider_pd *
 smartnic_provider_pd_alloc_object(struct smartnic_provider_context *ctx,
 				  uint32_t pdn)
@@ -288,25 +321,124 @@ static int smartnic_provider_validate_cqe_count(int cqe)
 	return 0;
 }
 
-static void smartnic_provider_translate_wc(const uint32_t data[4],
-					   uint32_t consumer_index,
-					   struct smartnic_provider_wc *wc)
+static uint32_t smartnic_provider_map_wc_status(uint32_t status)
 {
-	uint32_t meta = data[0];
+	switch (status) {
+	case SMARTNIC_PROVIDER_WC_SUCCESS:
+	case SMARTNIC_PROVIDER_WC_LOC_LEN_ERR:
+	case SMARTNIC_PROVIDER_WC_LOC_PROT_ERR:
+	case SMARTNIC_PROVIDER_WC_LOC_ACCESS_ERR:
+	case SMARTNIC_PROVIDER_WC_WR_FLUSH_ERR:
+	case SMARTNIC_PROVIDER_WC_REM_ACCESS_ERR:
+	case SMARTNIC_PROVIDER_WC_REM_OP_ERR:
+	case SMARTNIC_PROVIDER_WC_CQ_OVERFLOW_ERR:
+		return status;
+	default:
+		return SMARTNIC_PROVIDER_WC_GENERAL_ERR;
+	}
+}
+
+static uint32_t smartnic_provider_map_wc_opcode(uint32_t opcode)
+{
+	switch (opcode) {
+	case SMARTNIC_PROVIDER_WC_SEND:
+	case SMARTNIC_PROVIDER_WC_RECV:
+	case SMARTNIC_PROVIDER_WC_RDMA_WRITE:
+	case SMARTNIC_PROVIDER_WC_RDMA_READ:
+	case SMARTNIC_PROVIDER_WC_RECV_RDMA_WITH_IMM:
+	case SMARTNIC_PROVIDER_WC_COMP_SWAP:
+	case SMARTNIC_PROVIDER_WC_FETCH_ADD:
+		return opcode;
+	default:
+		return SMARTNIC_PROVIDER_WC_SEND;
+	}
+}
+
+static int smartnic_provider_cqe_is_valid(const struct smartnic_provider_cqe *cqe)
+{
+	return cqe && (cqe->meta & SMARTNIC_PROVIDER_CQE_VALID_BIT) != 0;
+}
+
+static void smartnic_provider_cqe_from_mailbox(const uint32_t data[4],
+					       uint32_t consumer_index,
+					       struct smartnic_provider_cqe *cqe)
+{
+	memset(cqe, 0, sizeof(*cqe));
+	cqe->meta = data[0];
+	cqe->byte_len = data[1];
+	cqe->qp_num = data[2];
+	cqe->imm_or_vendor_err = data[3];
+	cqe->wr_id = consumer_index;
+}
+
+int smartnic_provider_parse_cqe(const struct smartnic_provider_cqe *cqe,
+				struct smartnic_provider_wc *wc)
+{
+	uint32_t raw_status;
+	uint32_t raw_opcode;
+	uint32_t raw_flags;
+
+	if (!cqe || !wc) {
+		errno = EINVAL;
+		return -1;
+	}
 
 	memset(wc, 0, sizeof(*wc));
-	wc->wr_id = consumer_index;
-	wc->status = meta & SMARTNIC_PROVIDER_CQE_STATUS_MASK;
-	wc->opcode = (meta & SMARTNIC_PROVIDER_CQE_OPCODE_MASK) >>
+	if (!smartnic_provider_cqe_is_valid(cqe))
+		return 0;
+
+	raw_status = cqe->meta & SMARTNIC_PROVIDER_CQE_STATUS_MASK;
+	raw_opcode = (cqe->meta & SMARTNIC_PROVIDER_CQE_OPCODE_MASK) >>
 		     SMARTNIC_PROVIDER_CQE_OPCODE_SHIFT;
-	wc->wc_flags = (meta & SMARTNIC_PROVIDER_CQE_FLAGS_MASK) >>
-		       SMARTNIC_PROVIDER_CQE_FLAGS_SHIFT;
-	wc->byte_len = data[1];
-	wc->qp_num = data[2];
+	raw_flags = (cqe->meta & SMARTNIC_PROVIDER_CQE_FLAGS_MASK) >>
+		    SMARTNIC_PROVIDER_CQE_FLAGS_SHIFT;
+
+	wc->wr_id = cqe->wr_id;
+	wc->status = smartnic_provider_map_wc_status(raw_status);
+	wc->opcode = smartnic_provider_map_wc_opcode(raw_opcode);
+	wc->byte_len = cqe->byte_len;
+	wc->qp_num = cqe->qp_num;
+	wc->wc_flags = raw_flags;
+
 	if (wc->wc_flags & SMARTNIC_PROVIDER_WC_FLAG_IMM)
-		wc->imm_data = data[3];
-	else
-		wc->vendor_err = data[3];
+		wc->imm_data = ntohl(cqe->imm_or_vendor_err);
+	if (wc->wc_flags & SMARTNIC_PROVIDER_WC_FLAG_INV)
+		wc->invalidate_rkey = cqe->invalidate_rkey;
+	if (wc->status != SMARTNIC_PROVIDER_WC_SUCCESS)
+		wc->vendor_err = cqe->imm_or_vendor_err;
+
+	return 1;
+}
+
+static int smartnic_provider_poll_ring_cq(struct smartnic_provider_cq *cq,
+					  int num_entries,
+					  struct smartnic_provider_wc *wc)
+{
+	struct smartnic_provider_cqe *ring;
+	int polled = 0;
+
+	if (!cq->ring || cq->ring_size < (size_t)cq->cqe * sizeof(*ring))
+		return -ENOENT;
+
+	ring = (struct smartnic_provider_cqe *)cq->ring;
+	while (polled < num_entries) {
+		struct smartnic_provider_cqe *cqe = &ring[cq->consumer_index];
+		int parsed;
+
+		parsed = smartnic_provider_parse_cqe(cqe, &wc[polled]);
+		if (parsed < 0)
+			return polled ? polled : -errno;
+		if (parsed == 0)
+			break;
+
+		cqe->meta &= ~SMARTNIC_PROVIDER_CQE_VALID_BIT;
+		cq->consumer_index++;
+		if (cq->consumer_index >= (uint32_t)cq->cqe)
+			cq->consumer_index = 0;
+		polled++;
+	}
+
+	return polled;
 }
 
 static struct smartnic_provider_qp *
@@ -1447,6 +1579,13 @@ int smartnic_provider_close(struct smartnic_provider_context *ctx)
 	fd = ctx->fd;
 	ctx->fd = -1;
 	ctx->closed = 1;
+	smartnic_provider_async_event_free_list(ctx->async_pending_head);
+	smartnic_provider_async_event_free_list(ctx->async_outstanding);
+	ctx->async_pending_head = NULL;
+	ctx->async_pending_tail = NULL;
+	ctx->async_outstanding = NULL;
+	ctx->async_pending_count = 0;
+	ctx->async_outstanding_count = 0;
 	pthread_mutex_unlock(&ctx->lock);
 
 	if (fd >= 0)
@@ -1839,7 +1978,21 @@ int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
 		return -errno;
 
 	pthread_mutex_lock(&cq->lock);
+	if (cq->ring) {
+		int ring_polled = smartnic_provider_poll_ring_cq(cq, num_entries, wc);
+
+		pthread_mutex_unlock(&cq->lock);
+		if (ring_polled == -ENOENT) {
+			errno = EINVAL;
+			return -EINVAL;
+		}
+		return ring_polled;
+	}
+
 	while (polled < num_entries) {
+		struct smartnic_provider_cqe cqe;
+		int parsed;
+
 		memset(out, 0, sizeof(out));
 		in[0] = cq->kernel_handle;
 		in[1] = cq->consumer_index;
@@ -1852,11 +2005,17 @@ int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
 			return polled ? polled : -err;
 		}
 
-		if ((out[0] & SMARTNIC_PROVIDER_CQE_VALID_BIT) == 0)
+		smartnic_provider_cqe_from_mailbox(out, cq->consumer_index, &cqe);
+		parsed = smartnic_provider_parse_cqe(&cqe, &wc[polled]);
+		if (parsed < 0) {
+			int err = errno;
+
+			pthread_mutex_unlock(&cq->lock);
+			return polled ? polled : -err;
+		}
+		if (parsed == 0)
 			break;
 
-		smartnic_provider_translate_wc(out, cq->consumer_index,
-					       &wc[polled]);
 		cq->consumer_index++;
 		if (cq->consumer_index >= (uint32_t)cq->cqe)
 			cq->consumer_index = 0;
@@ -1905,6 +2064,124 @@ int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
 	pthread_mutex_unlock(&cq->lock);
 	pthread_mutex_unlock(&ctx->lock);
 	return 0;
+}
+
+int smartnic_provider_queue_async_event(struct smartnic_provider_context *ctx,
+					const struct smartnic_provider_async_event *event)
+{
+	struct smartnic_provider_async_event_node *node;
+
+	if (!event || event->event_type == 0 ||
+	    !smartnic_provider_async_event_element_valid(event)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	node = calloc(1, sizeof(*node));
+	if (!node)
+		return -1;
+
+	node->event = *event;
+	node->event.context = ctx;
+	node->event.provider_token = NULL;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (ctx->closed || ctx->fd < 0) {
+		pthread_mutex_unlock(&ctx->lock);
+		free(node);
+		errno = EBADF;
+		return -1;
+	}
+
+	if (node->event.element_type == SMARTNIC_PROVIDER_ASYNC_ELEMENT_DEVICE)
+		node->event.element.ctx = ctx;
+
+	if (ctx->async_pending_tail)
+		ctx->async_pending_tail->next = node;
+	else
+		ctx->async_pending_head = node;
+	ctx->async_pending_tail = node;
+	ctx->async_pending_count++;
+	pthread_mutex_unlock(&ctx->lock);
+
+	return 0;
+}
+
+int smartnic_provider_get_async_event(struct smartnic_provider_context *ctx,
+				      struct smartnic_provider_async_event *event)
+{
+	struct smartnic_provider_async_event_node *node;
+
+	if (!event) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	memset(event, 0, sizeof(*event));
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	pthread_mutex_lock(&ctx->lock);
+	if (!ctx->async_pending_head) {
+		pthread_mutex_unlock(&ctx->lock);
+		errno = EAGAIN;
+		return -1;
+	}
+
+	node = ctx->async_pending_head;
+	ctx->async_pending_head = node->next;
+	if (!ctx->async_pending_head)
+		ctx->async_pending_tail = NULL;
+	if (ctx->async_pending_count)
+		ctx->async_pending_count--;
+
+	node->next = ctx->async_outstanding;
+	ctx->async_outstanding = node;
+	ctx->async_outstanding_count++;
+	node->event.provider_token = node;
+	*event = node->event;
+	pthread_mutex_unlock(&ctx->lock);
+
+	return 0;
+}
+
+int smartnic_provider_ack_async_event(struct smartnic_provider_async_event *event)
+{
+	struct smartnic_provider_async_event_node **cursor;
+	struct smartnic_provider_async_event_node *node;
+	struct smartnic_provider_context *ctx;
+
+	if (!event || !event->context || !event->provider_token) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ctx = event->context;
+	if (!smartnic_provider_context_is_valid(ctx))
+		return -1;
+
+	node = (struct smartnic_provider_async_event_node *)event->provider_token;
+	pthread_mutex_lock(&ctx->lock);
+	cursor = &ctx->async_outstanding;
+	while (*cursor) {
+		if (*cursor == node) {
+			*cursor = node->next;
+			if (ctx->async_outstanding_count)
+				ctx->async_outstanding_count--;
+			pthread_mutex_unlock(&ctx->lock);
+			memset(event, 0, sizeof(*event));
+			free(node);
+			return 0;
+		}
+		cursor = &(*cursor)->next;
+	}
+	pthread_mutex_unlock(&ctx->lock);
+
+	errno = EINVAL;
+	return -1;
 }
 
 int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,

@@ -1,6 +1,6 @@
 # SmartNIC 用户态 Provider
 
-13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。13.8 添加了 Send/RDMA/UD WQE 构建 helper。13.9 添加了 post_send/post_recv 批量提交和 Doorbell memory barrier helper。
+13.1 在 `lib/libsmartnic` 中添加了首个面向 provider 的用户态层，覆盖设备发现和上下文生命周期。13.2 在此基础上加入 `query_device`、`query_port`、`query_gid` 和 `query_pkey` 查询 API。13.3 添加了保护域（PD）的分配和释放 API。13.4 添加了 Completion Queue 的创建、销毁、resize、poll 和 notify API。13.5 添加了 Queue Pair 的创建、修改、查询和销毁 API。13.6 添加了 Memory Region 注册和注销 API。13.7 添加了 UD Address Handle 创建和销毁 API。13.8 添加了 Send/RDMA/UD WQE 构建 helper。13.9 添加了 post_send/post_recv 批量提交和 Doorbell memory barrier helper。13.10 添加了 CQE parser。13.11 添加了 async event retrieval 和 acknowledgement API。
 
 ## 已实现的 API
 
@@ -35,6 +35,11 @@ int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
                               struct smartnic_provider_wc *wc);
 int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
                                     int solicited_only);
+int smartnic_provider_queue_async_event(struct smartnic_provider_context *ctx,
+                                        const struct smartnic_provider_async_event *event);
+int smartnic_provider_get_async_event(struct smartnic_provider_context *ctx,
+                                      struct smartnic_provider_async_event *event);
+int smartnic_provider_ack_async_event(struct smartnic_provider_async_event *event);
 int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,
                                 const struct smartnic_provider_qp_init_attr *init_attr,
                                 struct smartnic_provider_qp **qp);
@@ -148,15 +153,27 @@ SMARTNIC_PROVIDER_DEV_DIR=/path/to/devdir
 - notification armed / solicited-only 状态；
 - context 内部链表指针。
 
-当前实现选择 kernel/mailbox command path 作为最小可验证路径，没有 mmap 真实 CQ ring。这样可以先稳定 CQ 对象生命周期和 completion 翻译接口，后续驱动暴露 CQ ring 后再把 `ring` 字段接到 mmap-backed CQ buffer。
+当前实现保留 kernel/mailbox command path，同时定义了 provider 侧 64-byte `smartnic_provider_cqe` 格式。若 `cq->ring` 已经指向 mmap-backed CQ buffer，`poll_cq` 会优先从 ring 消费 CQE；若 ring 未映射，则回退到 `SMARTNIC_CMD_POLL_CQ` mailbox 路径。这样 CQE parser 和 consumer index 逻辑可以先稳定下来，真实驱动映射 CQ ring 后不需要重写 work completion 转换。
 
 `smartnic_provider_destroy_cq()` 会检查 CQ 是否属于 parent context，并拒绝仍有 active QP/child 引用的 CQ。检查通过后发送 `SMARTNIC_CMD_DESTROY_CQ`，再从 context CQ 链表摘除并释放 provider 对象。
 
 `smartnic_provider_resize_cq()` 通过 `SMARTNIC_CMD_RESIZE_CQ` 请求 kernel resize。只有 kernel 命令成功后才更新 provider 侧 `cqe` 和 index 元数据。如果驱动或硬件不支持 resize，ioctl/mailbox 应返回清晰错误，provider 不会修改本地状态。
 
-`smartnic_provider_poll_cq()` 当前通过 `SMARTNIC_CMD_POLL_CQ` 逐个拉取 completion。mailbox 返回的紧凑 CQE metadata 被翻译为 `struct smartnic_provider_wc`，包括 `wr_id`、`status`、`opcode`、`byte_len`、`qp_num`、`vendor_err`、`imm_data` 和 `wc_flags`。CQ 为空时返回 0；错误时返回负 errno；已经成功取到部分 completion 后遇到错误，则返回已取到的数量。
+`smartnic_provider_parse_cqe()` 是唯一的 CQE-to-work-completion 转换入口。它会先检查 CQE valid/owner bit，未 owned 的 CQE 不会被消费；有效 CQE 会被转换为 `struct smartnic_provider_wc`，填充 `wr_id`、`status`、`opcode`、`byte_len`、`qp_num`、`wc_flags`、`imm_data`、`invalidate_rkey` 和 `vendor_err`。未知 provider status 会映射到 `SMARTNIC_PROVIDER_WC_GENERAL_ERR`，未知 opcode 安全映射为 SEND，硬件的错误 detail 保存在 `vendor_err`。Immediate data 在 CQE 中按 network byte order 保存，parser 通过 `ntohl()` 转回 host order。
+
+`smartnic_provider_poll_cq()` 会遵守 `num_entries` 上限，CQ 为空或当前 consumer slot 没有 valid/owner bit 时返回已经取到的 completion 数量。消费一个 CQE 后才推进 consumer index，并在 ring-backed 路径中清除 valid bit；consumer index 到 `cqe - 1` 后回绕到 0。mailbox fallback 会把 4-word 紧凑 CQE 包装成同一个 `smartnic_provider_cqe` 后再调用 parser，因此两条路径返回一致的 Verbs-compatible work completion。若已经成功取到部分 completion 后遇到 mailbox 错误，则返回已取到数量；第一个 completion 就失败时返回负 errno。
 
 `smartnic_provider_req_notify_cq()` 通过 `SMARTNIC_CMD_ARM_CQ` arm CQ，支持 next-completion 和 solicited-only 两种模式。当前 poll/notify race 策略是先由调用方 poll drain，再 arm，再按需重新 poll；后续正式 verbs glue 会把该顺序封装为 libibverbs 兼容语义。
+
+## Async event
+
+13.11 提供 provider 侧 async event 队列。事件格式为 `struct smartnic_provider_async_event`，包含 `event_type`、`element_type`、CQ/QP/port/device element、`vendor_err`、parent context 以及 provider 私有 token。支持的基础事件类型包括 CQ error、QP fatal/request error、port active/error 和 device fatal；SRQ 还未实现，因此没有 SRQ element。
+
+`smartnic_provider_queue_async_event()` 是驱动事件、poll/IRQ 集成或后续 verbs glue 的 producer hook。它会复制事件并追加到 context 的 pending FIFO，保证多个事件按入队顺序被返回。
+
+`smartnic_provider_get_async_event()` 是非阻塞 API：如果 pending 队列为空，返回 `-1` 并设置 `errno = EAGAIN`；如果有事件，则从 pending FIFO 取出一个节点，移动到 outstanding list，并返回 Verbs-compatible event copy。事件必须随后用 `smartnic_provider_ack_async_event()` 确认。
+
+`smartnic_provider_ack_async_event()` 只接受从 `get_async_event` 返回的事件 token。确认成功后释放事件节点并清除调用方传入的 event 结构；重复 ack、伪造 token 或错误 context 会返回 `EINVAL`。context close 会清理 pending 和未 ack 的 outstanding 事件，避免未 ack event 泄漏。当前 provider 没有独立 async fd；可读性由 future driver/poll glue 把内核 event_pending 转换为 `queue_async_event()` 调用。
 
 ## QP 生命周期
 
@@ -268,7 +285,6 @@ Doorbell helper 当前写入 provider-side `last_sq_doorbell` / `last_rq_doorbel
 ## 13.9 后仍未实现的内容
 
 - 真实 mmap Doorbell MMIO；
-- CQE parser 的完整 verbs work completion 转换；
 - libibverbs provider 注册。
 
 这些有意留给后续 13.x 任务。

@@ -58,10 +58,12 @@ extern "C" {
 #define SMARTNIC_PROVIDER_OBJECT_MAGIC_AH 0x534e4148U
 
 #define SMARTNIC_PROVIDER_WC_FLAG_IMM 0x00000001U
+#define SMARTNIC_PROVIDER_WC_FLAG_INV 0x00000002U
 
 #define SMARTNIC_PROVIDER_CQ_NOTIFY_NEXT      0
 #define SMARTNIC_PROVIDER_CQ_NOTIFY_SOLICITED 1
 
+#define SMARTNIC_PROVIDER_CQE_BYTES 64U
 #define SMARTNIC_PROVIDER_CQE_VALID_BIT 0x80000000U
 #define SMARTNIC_PROVIDER_CQE_STATUS_MASK 0x000000ffU
 #define SMARTNIC_PROVIDER_CQE_OPCODE_SHIFT 8U
@@ -159,7 +161,11 @@ enum smartnic_provider_wc_status {
 	SMARTNIC_PROVIDER_WC_SUCCESS = 0,
 	SMARTNIC_PROVIDER_WC_LOC_LEN_ERR = 1,
 	SMARTNIC_PROVIDER_WC_LOC_PROT_ERR = 2,
+	SMARTNIC_PROVIDER_WC_LOC_ACCESS_ERR = 3,
 	SMARTNIC_PROVIDER_WC_WR_FLUSH_ERR = 5,
+	SMARTNIC_PROVIDER_WC_REM_ACCESS_ERR = 10,
+	SMARTNIC_PROVIDER_WC_REM_OP_ERR = 11,
+	SMARTNIC_PROVIDER_WC_CQ_OVERFLOW_ERR = 12,
 	SMARTNIC_PROVIDER_WC_GENERAL_ERR = 255,
 };
 
@@ -169,6 +175,8 @@ enum smartnic_provider_wc_opcode {
 	SMARTNIC_PROVIDER_WC_RDMA_WRITE = 2,
 	SMARTNIC_PROVIDER_WC_RDMA_READ = 3,
 	SMARTNIC_PROVIDER_WC_RECV_RDMA_WITH_IMM = 4,
+	SMARTNIC_PROVIDER_WC_COMP_SWAP = 5,
+	SMARTNIC_PROVIDER_WC_FETCH_ADD = 6,
 };
 
 enum smartnic_provider_qp_type {
@@ -204,7 +212,18 @@ struct smartnic_provider_wc {
 	uint32_t qp_num;
 	uint32_t vendor_err;
 	uint32_t imm_data;
+	uint32_t invalidate_rkey;
 	uint32_t wc_flags;
+};
+
+struct smartnic_provider_cqe {
+	uint32_t meta;
+	uint32_t byte_len;
+	uint32_t qp_num;
+	uint32_t imm_or_vendor_err;
+	uint64_t wr_id;
+	uint32_t invalidate_rkey;
+	uint32_t reserved[9];
 };
 
 struct smartnic_provider_qp_init_attr {
@@ -322,6 +341,43 @@ struct smartnic_provider_doorbell_record {
 	uint32_t count;
 };
 
+enum smartnic_provider_async_event_type {
+	SMARTNIC_PROVIDER_ASYNC_EVENT_CQ_ERR = 1,
+	SMARTNIC_PROVIDER_ASYNC_EVENT_QP_FATAL = 2,
+	SMARTNIC_PROVIDER_ASYNC_EVENT_QP_REQ_ERR = 3,
+	SMARTNIC_PROVIDER_ASYNC_EVENT_PORT_ACTIVE = 4,
+	SMARTNIC_PROVIDER_ASYNC_EVENT_PORT_ERR = 5,
+	SMARTNIC_PROVIDER_ASYNC_EVENT_DEVICE_FATAL = 6,
+};
+
+enum smartnic_provider_async_element_type {
+	SMARTNIC_PROVIDER_ASYNC_ELEMENT_NONE = 0,
+	SMARTNIC_PROVIDER_ASYNC_ELEMENT_CQ = 1,
+	SMARTNIC_PROVIDER_ASYNC_ELEMENT_QP = 2,
+	SMARTNIC_PROVIDER_ASYNC_ELEMENT_PORT = 3,
+	SMARTNIC_PROVIDER_ASYNC_ELEMENT_DEVICE = 4,
+};
+
+struct smartnic_provider_async_event {
+	uint32_t event_type;
+	uint32_t element_type;
+	struct smartnic_provider_context *context;
+	union {
+		struct smartnic_provider_cq *cq;
+		struct smartnic_provider_qp *qp;
+		uint8_t port_num;
+		struct smartnic_provider_context *ctx;
+		void *ptr;
+	} element;
+	uint32_t vendor_err;
+	void *provider_token;
+};
+
+struct smartnic_provider_async_event_node {
+	struct smartnic_provider_async_event event;
+	struct smartnic_provider_async_event_node *next;
+};
+
 struct smartnic_provider_device {
 	char name[SMARTNIC_PROVIDER_MAX_NAME];
 	char node_path[SMARTNIC_PROVIDER_MAX_PATH];
@@ -352,6 +408,11 @@ struct smartnic_provider_context {
 	struct smartnic_provider_qp *qp_list;
 	struct smartnic_provider_mr *mr_list;
 	struct smartnic_provider_ah *ah_list;
+	struct smartnic_provider_async_event_node *async_pending_head;
+	struct smartnic_provider_async_event_node *async_pending_tail;
+	struct smartnic_provider_async_event_node *async_outstanding;
+	unsigned int async_pending_count;
+	unsigned int async_outstanding_count;
 	int closed;
 };
 
@@ -481,10 +542,17 @@ int smartnic_provider_create_cq(struct smartnic_provider_context *ctx, int cqe,
 				struct smartnic_provider_cq **cq);
 int smartnic_provider_destroy_cq(struct smartnic_provider_cq *cq);
 int smartnic_provider_resize_cq(struct smartnic_provider_cq *cq, int cqe);
+int smartnic_provider_parse_cqe(const struct smartnic_provider_cqe *cqe,
+				struct smartnic_provider_wc *wc);
 int smartnic_provider_poll_cq(struct smartnic_provider_cq *cq, int num_entries,
 			      struct smartnic_provider_wc *wc);
 int smartnic_provider_req_notify_cq(struct smartnic_provider_cq *cq,
 				    int solicited_only);
+int smartnic_provider_queue_async_event(struct smartnic_provider_context *ctx,
+					const struct smartnic_provider_async_event *event);
+int smartnic_provider_get_async_event(struct smartnic_provider_context *ctx,
+				      struct smartnic_provider_async_event *event);
+int smartnic_provider_ack_async_event(struct smartnic_provider_async_event *event);
 
 int smartnic_provider_create_qp(struct smartnic_provider_pd *pd,
 				const struct smartnic_provider_qp_init_attr *init_attr,

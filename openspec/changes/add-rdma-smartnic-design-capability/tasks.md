@@ -134,8 +134,8 @@
 - [x] 13.7 Implement AH create/destroy APIs for UD.
 - [x] 13.8 Implement WQE builders for Send, Send with Immediate, RDMA Write, RDMA Write with Immediate, RDMA Read, and supported UD operations.
 - [x] 13.9 Implement post_send and post_recv batching with Doorbell memory barriers.
-- [ ] 13.10 Implement CQE parser that returns Verbs-compatible work completions.
-- [ ] 13.11 Implement async event retrieval and acknowledgement APIs.
+- [x] 13.10 Implement CQE parser that returns Verbs-compatible work completions.
+- [x] 13.11 Implement async event retrieval and acknowledgement APIs.
 - [ ] 13.12 Add pkg-config, provider metadata, examples, and userspace unit tests.
 
 ## 14. Cocotb Verilator Verification
