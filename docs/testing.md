@@ -64,6 +64,17 @@ sudo rmmod smartnic
 
 脚本检查特性查询、复位、mailbox 通路、队列创建/销毁、队列 mmap、poll 以及最近的 `dmesg` 警告。
 
+## Minimal Verbs Bring-Up Example
+
+15.1 添加了一个最小 RC Send/Recv 示例：
+
+```bash
+make -C examples smartnic_minimal_verbs_example
+SMARTNIC_PROVIDER_DEVICE=/dev/smartnic0 ./examples/smartnic_minimal_verbs_example
+```
+
+该示例走现有 userspace provider API：打开设备、查询能力、创建 PD/CQ/RC QP、注册 send/recv MR、post Recv、post Send，并轮询 completion。它假设底层驱动/硬件支持 self-connected loopback RC QP bring-up；无设备或权限不足时返回退出码 77 并打印 `SKIP`。15.2 的 perftest 和 15.3 的 UCX 兼容性测试不属于该示例。
+
 ## KUnit
 
 `drivers/linux/smartnic_kunit.c` 包含用于常量、UAPI 布局、mailbox errno、DMA 参数、poll 掩码和 IRQ 过滤的可选 KUnit 烟雾测试。在支持 KUnit 的 Linux 内核树中以 `CONFIG_SMARTNIC_KUNIT=y` 构建即可。

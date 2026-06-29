@@ -8,7 +8,7 @@ UAPI_INC := $(PROJECT_ROOT)/include/uapi
 PROVIDER_DIR := $(PROJECT_ROOT)/lib/libsmartnic
 
 UAPI_EXAMPLES := smartnic_ioctl_example smartnic_poll_example smartnic_user_flow_example
-PROVIDER_EXAMPLES := smartnic_provider_query_example smartnic_provider_cq_poll_example smartnic_provider_async_event_example
+PROVIDER_EXAMPLES := smartnic_provider_query_example smartnic_provider_cq_poll_example smartnic_provider_async_event_example smartnic_minimal_verbs_example
 
 .PHONY: all clean
 
@@ -35,5 +35,19 @@ $(PROVIDER_DIR)/libsmartnic_provider.a:
 smartnic_provider_%_example: smartnic_provider_%_example.c $(PROVIDER_DIR)/smartnic_provider.h $(PROVIDER_DIR)/libsmartnic_provider.a
 	$(CC) $(CPPFLAGS) -I$(PROVIDER_DIR) -I$(UAPI_INC) $(CFLAGS) -o $@ $< $(PROVIDER_DIR)/libsmartnic_provider.a $(LDFLAGS)
 
+smartnic_minimal_verbs_example: smartnic_minimal_verbs_example.c $(PROVIDER_DIR)/smartnic_provider.h Makefile
+	@if printf '#include <linux/ioctl.h>\n#include <linux/types.h>\nint main(void){return 0;}\n' | \
+		$(CC) -x c - -o /tmp/smartnic-minimal-verbs-uapi-check.$$ >/dev/null 2>&1; then \
+		rm -f /tmp/smartnic-minimal-verbs-uapi-check.$$; \
+		$(MAKE) smartnic_minimal_verbs_example.build; \
+	else \
+		rm -f /tmp/smartnic-minimal-verbs-uapi-check.$$; \
+		echo "[examples] Linux UAPI headers not available; smartnic_minimal_verbs_example build skipped."; \
+	fi
+
+smartnic_minimal_verbs_example.build: smartnic_minimal_verbs_example.c $(PROVIDER_DIR)/smartnic_provider.h $(PROVIDER_DIR)/libsmartnic_provider.a
+	$(CC) $(CPPFLAGS) -I$(PROVIDER_DIR) -I$(UAPI_INC) $(CFLAGS) -o $@ $< $(PROVIDER_DIR)/libsmartnic_provider.a $(LDFLAGS)
+	@mv $@ smartnic_minimal_verbs_example
+
 clean:
-	@rm -f $(UAPI_EXAMPLES) $(PROVIDER_EXAMPLES)
+	@rm -f $(UAPI_EXAMPLES) $(PROVIDER_EXAMPLES) smartnic_minimal_verbs_example.build

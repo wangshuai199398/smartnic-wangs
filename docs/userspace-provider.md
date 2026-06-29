@@ -291,6 +291,7 @@ Doorbell helper 当前写入 provider-side `last_sq_doorbell` / `last_rq_doorbel
 - `examples/smartnic_provider_query_example.c`：open `/dev/smartnicX` 并 query device；
 - `examples/smartnic_provider_cq_poll_example.c`：创建 CQ 并调用 `smartnic_provider_poll_cq()`；
 - `examples/smartnic_provider_async_event_example.c`：调用 async event get/ack 路径。
+- `examples/smartnic_minimal_verbs_example.c`：最小 RC Send/Recv bring-up 示例，执行 open device、query、PD/CQ/QP/MR 创建、post_recv、post_send 和 poll completion。
 
 生成 staged pkg-config 和 metadata：
 
@@ -323,6 +324,26 @@ make -C examples
 ```
 
 当前 examples 是 Linux-only：如果环境缺少 Linux UAPI headers，Makefile 会清晰跳过。provider examples 依赖 `lib/libsmartnic/libsmartnic_provider.a` 和 `smartnic_provider.h`，不使用私有测试 helper。
+
+运行最小 RC Send/Recv 示例：
+
+```bash
+SMARTNIC_PROVIDER_DEVICE=/dev/smartnic0 ./examples/smartnic_minimal_verbs_example
+```
+
+也可以直接把设备节点作为第一个参数传入：
+
+```bash
+./examples/smartnic_minimal_verbs_example /dev/smartnic0
+```
+
+示例会创建一个 loopback-style RC QP，将 `dest_qpn` 设置为本地 QPN，注册独立的 send/recv MR，先 post 一个 Recv WR，再 post 一个 signaled Send WR，最后轮询两个 completion。成功时输出类似：
+
+```text
+SUCCESS: minimal RC Send/Recv completed; recv buffer="smartnic minimal rc send"
+```
+
+如果没有 `/dev/smartnicX`、权限不足或当前环境没有 SmartNIC provider 设备，示例以退出码 77 报告 `SKIP`，便于 CI 和无硬件开发机区分“环境不可用”和“示例失败”。该示例不做连接管理，也不覆盖 perftest、UCX 或 libfabric；这些兼容性工作分别留给 15.2、15.3 和 15.4。
 
 运行 userspace unit/static tests：
 

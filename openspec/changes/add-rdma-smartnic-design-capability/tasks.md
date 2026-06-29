@@ -140,19 +140,19 @@
 
 ## 14. Cocotb Verilator Verification
 
-- [ ] 14.1 Implement PCIe BFM for config, memory read/write, completions, MSI-X, and function identity.
-- [ ] 14.2 Implement Ethernet/RoCEv2 BFM for packet construction, parsing, error injection, and CNP/PFC stimuli.
-- [ ] 14.3 Implement host memory model with DMA read/write visibility and data integrity checks.
-- [ ] 14.4 Implement scoreboard for WR-to-CQE matching, payload comparison, PSN tracking, retry behavior, and error statuses.
-- [ ] 14.5 Implement functional coverage for opcodes, QP states, CQ statuses, MR permissions, message sizes, SGE counts, QP types, and congestion events.
-- [ ] 14.6 Implement module-level Cocotb tests for PCIe, Doorbell, QP, CQ, MR, DMA, packet, transport, congestion, and top-level reset.
-- [ ] 14.7 Implement integration tests for Doorbell-to-CQE, RC Send, RDMA Write, RDMA Read, UD Send, MSI-X, and SR-IOV isolation.
-- [ ] 14.8 Implement protocol compliance tests for RoCEv2 header fields, ACK/NAK, RNR, immediate data, invalid packets, and ICRC behavior.
-- [ ] 14.9 Implement regression script that runs lint, unit tests, integration tests, compatibility simulations, and coverage report generation.
+- [x] 14.1 Implement PCIe BFM for config, memory read/write, completions, MSI-X, and function identity.
+- [x] 14.2 Implement Ethernet/RoCEv2 BFM for packet construction, parsing, error injection, and CNP/PFC stimuli.
+- [x] 14.3 Implement host memory model with DMA read/write visibility and data integrity checks.
+- [x] 14.4 Implement scoreboard for WR-to-CQE matching, payload comparison, PSN tracking, retry behavior, and error statuses.
+- [x] 14.5 Implement functional coverage for opcodes, QP states, CQ statuses, MR permissions, message sizes, SGE counts, QP types, and congestion events.
+- [x] 14.6 Implement module-level Cocotb tests for PCIe, Doorbell, QP, CQ, MR, DMA, packet, transport, congestion, and top-level reset.
+- [x] 14.7 Implement integration tests for Doorbell-to-CQE, RC Send, RDMA Write, RDMA Read, UD Send, MSI-X, and SR-IOV isolation.
+- [x] 14.8 Implement protocol compliance tests for RoCEv2 header fields, ACK/NAK, RNR, immediate data, invalid packets, and ICRC behavior.
+- [x] 14.9 Implement regression script that runs lint, unit tests, integration tests, compatibility simulations, and coverage report generation.
 
 ## 15. Compatibility and Performance Validation
 
-- [ ] 15.1 Add a minimal verbs example that opens the device, creates PD/CQ/QP/MR, posts Send/Recv, and polls completions.
+- [x] 15.1 Add a minimal verbs example that opens the device, creates PD/CQ/QP/MR, posts Send/Recv, and polls completions.
 - [ ] 15.2 Add perftest compatibility target for supported RC Send, RDMA Write, and RDMA Read tests.
 - [ ] 15.3 Add UCX compatibility smoke tests for supported RC operations.
 - [ ] 15.4 Add libfabric compatibility smoke tests for supported verbs-backed operations.

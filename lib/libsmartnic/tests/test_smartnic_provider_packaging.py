@@ -26,6 +26,7 @@ def main() -> None:
         "query": read(REPO / "examples/smartnic_provider_query_example.c"),
         "cq": read(REPO / "examples/smartnic_provider_cq_poll_example.c"),
         "async": read(REPO / "examples/smartnic_provider_async_event_example.c"),
+        "minimal": read(REPO / "examples/smartnic_minimal_verbs_example.c"),
     }
     docs = read(REPO / "docs/userspace-provider.md")
     tasks = read(REPO / "openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
@@ -64,6 +65,8 @@ def main() -> None:
         "smartnic_provider_query_example",
         "smartnic_provider_cq_poll_example",
         "smartnic_provider_async_event_example",
+        "smartnic_minimal_verbs_example",
+        "smartnic_minimal_verbs_example.build",
         "$(PROVIDER_DIR)/libsmartnic_provider.a",
         "-I$(PROVIDER_DIR)",
     ]:
@@ -75,6 +78,13 @@ def main() -> None:
     require(examples["cq"], "smartnic_provider_poll_cq", "CQ example poll")
     require(examples["async"], "smartnic_provider_get_async_event", "async example get")
     require(examples["async"], "smartnic_provider_ack_async_event", "async example ack")
+    require(examples["minimal"], "smartnic_provider_alloc_pd", "minimal example alloc PD")
+    require(examples["minimal"], "smartnic_provider_create_cq", "minimal example create CQ")
+    require(examples["minimal"], "smartnic_provider_create_qp", "minimal example create QP")
+    require(examples["minimal"], "smartnic_provider_reg_mr", "minimal example register MR")
+    require(examples["minimal"], "smartnic_provider_post_recv", "minimal example post recv")
+    require(examples["minimal"], "smartnic_provider_post_send", "minimal example post send")
+    require(examples["minimal"], "smartnic_provider_poll_cq", "minimal example poll CQ")
     for source in examples.values():
         require(source, "#include <smartnic_provider.h>", "provider example include")
 
@@ -85,6 +95,7 @@ def main() -> None:
         "smartnic_provider_query_example",
         "smartnic_provider_cq_poll_example",
         "smartnic_provider_async_event_example",
+        "smartnic_minimal_verbs_example",
         "make -C lib/libsmartnic test",
         "DESTDIR=/tmp/smartnic-stage",
     ]:

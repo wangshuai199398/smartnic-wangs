@@ -28,6 +28,7 @@ def main() -> None:
     ex_provider_query = read(ROOT / "examples/smartnic_provider_query_example.c")
     ex_provider_cq = read(ROOT / "examples/smartnic_provider_cq_poll_example.c")
     ex_provider_async = read(ROOT / "examples/smartnic_provider_async_event_example.c")
+    ex_provider_minimal = read(ROOT / "examples/smartnic_minimal_verbs_example.c")
     tasks = read(ROOT / "openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
 
     combined_docs = "\n".join([driver, guide, release, uapi, troubleshooting])
@@ -152,11 +153,12 @@ def main() -> None:
         "smartnic_provider_query_example",
         "smartnic_provider_cq_poll_example",
         "smartnic_provider_async_event_example",
+        "smartnic_minimal_verbs_example",
         "pkg-config --cflags --libs libsmartnic-provider",
     ]:
         require(provider_doc, needle, f"userspace provider doc {needle}")
 
-    for source in [ex_provider_query, ex_provider_cq, ex_provider_async]:
+    for source in [ex_provider_query, ex_provider_cq, ex_provider_async, ex_provider_minimal]:
         require(source, "#include <smartnic_provider.h>", "provider example include")
     require(ex_provider_query, "smartnic_provider_open_path", "provider query open")
     require(ex_provider_query, "smartnic_provider_query_device", "provider query device")
@@ -164,6 +166,12 @@ def main() -> None:
     require(ex_provider_cq, "smartnic_provider_poll_cq", "provider CQ poll")
     require(ex_provider_async, "smartnic_provider_get_async_event", "provider async get")
     require(ex_provider_async, "smartnic_provider_ack_async_event", "provider async ack")
+    require(ex_provider_minimal, "smartnic_provider_alloc_pd", "minimal provider alloc PD")
+    require(ex_provider_minimal, "smartnic_provider_create_qp", "minimal provider create QP")
+    require(ex_provider_minimal, "smartnic_provider_reg_mr", "minimal provider register MR")
+    require(ex_provider_minimal, "smartnic_provider_post_recv", "minimal provider post recv")
+    require(ex_provider_minimal, "smartnic_provider_post_send", "minimal provider post send")
+    require(ex_provider_minimal, "smartnic_provider_poll_cq", "minimal provider poll CQ")
 
     print("smartnic driver documentation checks passed")
 

@@ -9,9 +9,41 @@ WAVES ?= 0
 
 RTL_COMMON := ../../rtl/common/smartnic_pkg.sv
 
-.PHONY: pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests top-tests test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-congestion-integration test-smartnic-top-structure test-csr-fabric-structure test-doorbell-ctrl-structure test-rc-pipeline-structure test-rdma-write-read-structure test-ud-datapath-structure test-top-level-paths test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker test-cnp-packet-generator test-cnp-receive-classifier test-dcqcn-state-machine test-tx-pacer-token-bucket test-pfc-pause-scheduler clean
+.PHONY: module-level-tests rdma-integration-tests protocol-compliance-tests test-module-level-stage14 test-rdma-integration-stage14 test-roce-protocol-compliance-stage14 pcie-control-plane-tests doorbell-tests qp-tests cq-tests mr-tests dma-tests packet-tests transport-tests congestion-tests top-tests test-pcie-bfm test-host-memory-model test-rdma-scoreboard test-rdma-coverage test-pcie-cfg test-pcie-bar test-csr-mailbox test-msix test-sriov test-doorbell-decoder test-doorbell-access test-sq-doorbell test-rq-doorbell test-cq-arm-doorbell test-qp-context test-qp-state-validator test-qp-lifecycle test-sq-engine test-rq-engine test-qp-cleanup test-qp-integration test-cq-context test-completion-engine test-cqe-write-path test-cq-index-manager test-cq-notification test-cq-integration test-mr-table test-mr-registration test-mr-deregistration test-mr-key-checker test-mr-access-checker test-mr-pd-checker test-memory-window test-mr-integration test-dma-descriptor-dispatcher test-dma-wqe-sge-fetcher test-dma-sge-traversal test-dma-mr-integration test-dma-segment-splitter test-dma-arbiter test-dma-host-read-path test-dma-host-write-path test-dma-error-propagation test-dma-integration test-roce-ethernet-bfm test-roce-packet-parser test-roce-ingress-validator test-roce-payload-extractor test-roce-packet-builder test-roce-icrc-placeholder test-roce-packet-stage8 test-transport-stage9 test-congestion-stage10 test-congestion-integration test-smartnic-top-structure test-csr-fabric-structure test-doorbell-ctrl-structure test-rc-pipeline-structure test-rdma-write-read-structure test-ud-datapath-structure test-top-level-paths test-ah-table test-rc-send-engine test-rc-recv-engine test-rc-rdma-read-engine test-rc-immediate-engine test-ud-tx-engine test-ud-rx-engine test-ecn-ingress-marker test-cnp-packet-generator test-cnp-receive-classifier test-dcqcn-state-machine test-tx-pacer-token-bucket test-pfc-pause-scheduler clean
+
+module-level-tests:
+	@$(MAKE) test-module-level-stage14
+	@$(MAKE) pcie-control-plane-tests
+	@$(MAKE) doorbell-tests
+	@$(MAKE) qp-tests
+	@$(MAKE) cq-tests
+	@$(MAKE) mr-tests
+	@$(MAKE) dma-tests
+	@$(MAKE) packet-tests
+	@$(MAKE) transport-tests
+	@$(MAKE) congestion-tests
+	@$(MAKE) top-tests
+
+test-module-level-stage14:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_module_level_stage14.py
+
+rdma-integration-tests:
+	@$(MAKE) test-rdma-integration-stage14
+
+test-rdma-integration-stage14:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_rdma_integration_stage14.py
+
+protocol-compliance-tests:
+	@$(MAKE) test-roce-protocol-compliance-stage14
+
+test-roce-protocol-compliance-stage14:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_roce_protocol_compliance_stage14.py
 
 pcie-control-plane-tests:
+	@$(MAKE) test-pcie-bfm
+	@$(MAKE) test-host-memory-model
+	@$(MAKE) test-rdma-scoreboard
+	@$(MAKE) test-rdma-coverage
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
 		echo "[cocotb] 未安装 cocotb，跳过 PCIe 控制面单元测试。"; \
 	elif ! command -v verilator >/dev/null 2>&1; then \
@@ -23,6 +55,18 @@ pcie-control-plane-tests:
 		$(MAKE) test-msix; \
 		$(MAKE) test-sriov; \
 	fi
+
+test-pcie-bfm:
+	@python3 test_pcie_bfm.py
+
+test-host-memory-model:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_host_memory_model.py
+
+test-rdma-scoreboard:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_rdma_scoreboard.py
+
+test-rdma-coverage:
+	@PYTHONDONTWRITEBYTECODE=1 python3 test_rdma_coverage.py
 
 doorbell-tests:
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
@@ -101,6 +145,7 @@ dma-tests:
 	fi
 
 packet-tests:
+	@$(MAKE) test-roce-ethernet-bfm
 	@$(MAKE) test-roce-packet-stage8
 	@if ! command -v cocotb-config >/dev/null 2>&1; then \
 		echo "[cocotb] 未安装 cocotb，跳过 Packet parser 单元测试。"; \
@@ -358,6 +403,9 @@ test-dma-error-propagation:
 test-dma-integration:
 	@echo "[dma-integration] Running DMA mock-based integration tests..."
 	python3 test_dma_integration.py
+
+test-roce-ethernet-bfm:
+	@python3 test_roce_ethernet_bfm.py
 
 test-roce-packet-parser:
 	$(MAKE) TOPLEVEL=roce_packet_parser MODULE=test_roce_packet_parser \

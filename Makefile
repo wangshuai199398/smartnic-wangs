@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-static-check driver-integration-test driver-release-check userspace regression coverage clean
+.PHONY: all lint verilator cocotb module-test integration-test protocol-test pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-static-check driver-integration-test driver-release-check userspace regression coverage clean
 
 all: lint driver userspace
 
@@ -24,6 +24,18 @@ cocotb:
 	@$(MAKE) -C sim/cocotb transport-tests
 	@$(MAKE) -C sim/cocotb congestion-tests
 	@$(MAKE) -C sim/cocotb top-tests
+
+module-test:
+	@echo "[module-test] 运行 14.6 模块级 Cocotb/BFM smoke 和现有模块级测试入口。"
+	@$(MAKE) -C sim/cocotb module-level-tests
+
+integration-test:
+	@echo "[integration-test] 运行 14.7 RDMA/RoCE Cocotb/BFM 集成测试入口。"
+	@$(MAKE) -C sim/cocotb rdma-integration-tests
+
+protocol-test:
+	@echo "[protocol-test] 运行 14.8 RoCEv2/RDMA 协议一致性测试入口。"
+	@$(MAKE) -C sim/cocotb protocol-compliance-tests
 
 pcie-test:
 	@echo "[pcie-test] 运行 PCIe endpoint/control-plane 模块级测试入口。"
@@ -87,11 +99,13 @@ userspace:
 	@echo "[userspace] 构建 smartnicctl 用户态控制工具。"
 	@$(MAKE) -C tools
 
-regression: lint verilator cocotb
-	@echo "[regression] 已完成 lint、Verilator、Cocotb 组合回归入口。"
+regression:
+	@echo "[regression] 运行 14.9 RDMA 验证回归入口。"
+	@bash tests/run_rdma_regression.sh --mode full
 
 coverage:
-	@echo "[coverage] 覆盖率报告占位：后续会汇总 Cocotb 功能覆盖率和 Verilator 覆盖率。"
+	@echo "[coverage] 运行 RDMA 功能覆盖率报告入口。"
+	@bash tests/run_rdma_regression.sh coverage
 
 clean:
 	@echo "[clean] 清理构建产物占位。"
