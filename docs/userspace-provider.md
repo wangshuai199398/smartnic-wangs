@@ -282,7 +282,58 @@ SQ/RQ ring 使用 reserved-one-entry 策略避免覆盖未完成 WQE：`next_pro
 
 Doorbell helper 当前写入 provider-side `last_sq_doorbell` / `last_rq_doorbell` 记录，保留 QPN、queue type、producer index 和本批 count。真实 mmap/MMIO Doorbell 页会在后续 fast path 任务中接入。写 Doorbell 前调用 `__sync_synchronize()` 作为跨平台保守 write memory barrier，保证 WQE 和 metadata 对设备可见后再发布 producer index。x86 上这比普通 store-store ordering 更强；弱内存序架构需要保留该屏障或替换为平台专用 MMIO barrier。
 
-## 13.9 后仍未实现的内容
+## Packaging, metadata 和 examples
+
+13.12 添加了 provider packaging 文件：
+
+- `lib/libsmartnic/libsmartnic-provider.pc.in`：pkg-config 模板；
+- `lib/libsmartnic/smartnic-provider.json`：provider metadata，包含 provider name、ABI version、device vendor/device ID、RC/UD transport 和 Ethernet/RoCE link layer；
+- `examples/smartnic_provider_query_example.c`：open `/dev/smartnicX` 并 query device；
+- `examples/smartnic_provider_cq_poll_example.c`：创建 CQ 并调用 `smartnic_provider_poll_cq()`；
+- `examples/smartnic_provider_async_event_example.c`：调用 async event get/ack 路径。
+
+生成 staged pkg-config 和 metadata：
+
+```bash
+make -C lib/libsmartnic packaging
+```
+
+安装到 staging 目录：
+
+```bash
+make -C lib/libsmartnic DESTDIR=/tmp/smartnic-stage PREFIX=/usr install
+PKG_CONFIG_PATH=/tmp/smartnic-stage/usr/lib/pkgconfig pkg-config --cflags --libs libsmartnic-provider
+```
+
+默认安装布局：
+
+| 文件 | 安装路径 |
+| --- | --- |
+| `smartnic_provider.h` | `${includedir}/smartnic/` |
+| `libsmartnic_provider.a` | `${libdir}/`，若当前平台可构建 |
+| `libsmartnic-provider.pc` | `${libdir}/pkgconfig/` |
+| `smartnic-provider.json` | `${libdir}/smartnic/providers/` |
+
+provider discovery 假设上层 RDMA glue 会读取 metadata 中的 `device_node_prefix = smartnic`，再使用 provider discovery API 扫描 `/dev/smartnic*`。当前尚未接入 rdma-core provider plugin loader；13.12 只固定 metadata 和 packaging 约定。
+
+构建 examples：
+
+```bash
+make -C examples
+```
+
+当前 examples 是 Linux-only：如果环境缺少 Linux UAPI headers，Makefile 会清晰跳过。provider examples 依赖 `lib/libsmartnic/libsmartnic_provider.a` 和 `smartnic_provider.h`，不使用私有测试 helper。
+
+运行 userspace unit/static tests：
+
+```bash
+make -C lib/libsmartnic test
+python3 docs/tests_driver_docs.py
+```
+
+`test_smartnic_provider_static.py` 覆盖 provider API surface、CQE parser、async event 和 post_send/post_recv；`test_smartnic_provider_packaging.py` 覆盖 pkg-config 模板、provider metadata、examples 和 install/staging 约定。
+
+## 13.12 后仍未实现的内容
 
 - 真实 mmap Doorbell MMIO；
 - libibverbs provider 注册。

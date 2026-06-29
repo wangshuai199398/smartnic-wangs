@@ -1,0 +1,16 @@
+{
+  "name": "smartnic",
+  "provider": "libsmartnic-provider",
+  "abi_version": 1,
+  "library": "libsmartnic_provider.so",
+  "static_library": "libsmartnic_provider.a",
+  "device_node_prefix": "smartnic",
+  "device_match": {
+    "vendor_id": "0x1d0f",
+    "device_id": "0x5a10",
+    "transport": ["rc", "ud"],
+    "link_layer": "ethernet-roce"
+  },
+  "headers": ["smartnic_provider.h"],
+  "description": "Prototype RDMA SmartNIC userspace provider metadata"
+}

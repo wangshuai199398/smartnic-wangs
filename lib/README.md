@@ -18,4 +18,4 @@
 - `lib/libsmartnic/smartnic_provider.h`
 - `lib/libsmartnic/smartnic_provider.c`
 
-这些 API 负责发现 `/dev/smartnic*`、打开驱动 fd、缓存基础 ABI/能力信息、查询设备/端口/GID/P_Key，并通过 mailbox 命令分配/释放 PD、创建/销毁/resize/轮询/arm CQ、创建/修改/查询/销毁 QP、注册/注销 MR、创建/销毁 UD AH、构建 Send/RDMA/UD WQE，执行 post_send/post_recv shadow ring 提交和 Doorbell 记录，把 provider CQE 解析为 Verbs-compatible work completion，并维护 async event get/ack 队列。真实 mmap Doorbell 和 provider 注册元数据仍留给后续 13.x 任务。
+这些 API 负责发现 `/dev/smartnic*`、打开驱动 fd、缓存基础 ABI/能力信息、查询设备/端口/GID/P_Key，并通过 mailbox 命令分配/释放 PD、创建/销毁/resize/轮询/arm CQ、创建/修改/查询/销毁 QP、注册/注销 MR、创建/销毁 UD AH、构建 Send/RDMA/UD WQE，执行 post_send/post_recv shadow ring 提交和 Doorbell 记录，把 provider CQE 解析为 Verbs-compatible work completion，并维护 async event get/ack 队列。13.12 还提供 `libsmartnic-provider.pc` 生成、`smartnic-provider.json` metadata、provider examples 和 userspace packaging 静态测试。真实 mmap Doorbell 和 rdma-core provider plugin glue 仍留给后续任务。

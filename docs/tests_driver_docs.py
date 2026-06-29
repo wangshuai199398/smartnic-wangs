@@ -25,6 +25,9 @@ def main() -> None:
     ex_ioctl = read(ROOT / "examples/smartnic_ioctl_example.c")
     ex_poll = read(ROOT / "examples/smartnic_poll_example.c")
     ex_flow = read(ROOT / "examples/smartnic_user_flow_example.c")
+    ex_provider_query = read(ROOT / "examples/smartnic_provider_query_example.c")
+    ex_provider_cq = read(ROOT / "examples/smartnic_provider_cq_poll_example.c")
+    ex_provider_async = read(ROOT / "examples/smartnic_provider_async_event_example.c")
     tasks = read(ROOT / "openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
 
     combined_docs = "\n".join([driver, guide, release, uapi, troubleshooting])
@@ -119,7 +122,7 @@ def main() -> None:
         "smartnic_provider_open",
         "smartnic_provider_close",
         "SMARTNIC_PROVIDER_DEV_DIR",
-        "13.9 后仍未实现的内容",
+        "13.12 后仍未实现的内容",
         "smartnic_provider_query_device",
         "smartnic_provider_query_port",
         "smartnic_provider_query_gid",
@@ -142,8 +145,25 @@ def main() -> None:
         "smartnic_provider_build_send_wqe",
         "smartnic_provider_post_send",
         "smartnic_provider_post_recv",
+        "smartnic_provider_get_async_event",
+        "smartnic_provider_ack_async_event",
+        "libsmartnic-provider.pc",
+        "smartnic-provider.json",
+        "smartnic_provider_query_example",
+        "smartnic_provider_cq_poll_example",
+        "smartnic_provider_async_event_example",
+        "pkg-config --cflags --libs libsmartnic-provider",
     ]:
         require(provider_doc, needle, f"userspace provider doc {needle}")
+
+    for source in [ex_provider_query, ex_provider_cq, ex_provider_async]:
+        require(source, "#include <smartnic_provider.h>", "provider example include")
+    require(ex_provider_query, "smartnic_provider_open_path", "provider query open")
+    require(ex_provider_query, "smartnic_provider_query_device", "provider query device")
+    require(ex_provider_cq, "smartnic_provider_create_cq", "provider CQ create")
+    require(ex_provider_cq, "smartnic_provider_poll_cq", "provider CQ poll")
+    require(ex_provider_async, "smartnic_provider_get_async_event", "provider async get")
+    require(ex_provider_async, "smartnic_provider_ack_async_event", "provider async ack")
 
     print("smartnic driver documentation checks passed")
 

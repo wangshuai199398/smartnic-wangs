@@ -136,7 +136,7 @@
 - [x] 13.9 Implement post_send and post_recv batching with Doorbell memory barriers.
 - [x] 13.10 Implement CQE parser that returns Verbs-compatible work completions.
 - [x] 13.11 Implement async event retrieval and acknowledgement APIs.
-- [ ] 13.12 Add pkg-config, provider metadata, examples, and userspace unit tests.
+- [x] 13.12 Add pkg-config, provider metadata, examples, and userspace unit tests.
 
 ## 14. Cocotb Verilator Verification
 

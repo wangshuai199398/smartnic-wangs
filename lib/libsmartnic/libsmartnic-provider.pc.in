@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=${prefix}
+libdir=@libdir@
+includedir=@includedir@
+
+Name: libsmartnic-provider
+Description: SmartNIC prototype RDMA userspace provider library
+Version: @version@
+Libs: -L${libdir} -lsmartnic_provider -pthread
+Cflags: -I${includedir}
