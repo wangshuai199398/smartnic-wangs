@@ -63,10 +63,10 @@
 - [x] 7.3 实现 SGE 遍历，包含总长度累计以及零重叠校验。
 - [x] 7.4 实现对每个 DMA segment 的 MR 查找和权限集成。
 - [x] 7.5 实现主机内存读路径，用于 Send 和 RDMA Write 的 payload 生成。
-- [x] 7.6 Implement host memory write path for Recv and RDMA Read response payload delivery.
-- [x] 7.7 Implement PMTU and 4KB physical page boundary segmentation.
-- [x] 7.8 Implement DMA arbitration across active QPs with configurable fairness policy.
-- [x] 7.9 Implement DMA error propagation into completion status.
+- [x] 7.6 实现主机内存写路径，用于 Recv 和 RDMA Read 响应 payload 投递。
+- [x] 7.7 实现 PMTU 和 4KB 物理页边界切分。
+- [x] 7.8 实现跨 active QP 的 DMA 仲裁，并支持可配置公平性策略。
+- [x] 7.9 实现 DMA 错误向 completion status 的传播。
 - [x] 7.10 添加 DMA 测试，覆盖单 SGE、多 SGE、256 SGE、非对齐 segment、4KB 边界切分、仲裁公平性以及错误注入。
 
 ## 8. 数据包解析器与数据包构造器
@@ -81,89 +81,89 @@
 ## 9. RoCEv2 传输引擎
 
 - [x] 9.1 实现 RC 发送侧 PSN 分配、未完成数据包追踪、ACK 处理、重试定时器以及重试耗尽处理。
-- [x] 9.2 Implement RC receive-side PSN validation, duplicate/replay drop, gap NAK generation, ACK coalescing, and RNR NAK generation.
-- [x] 9.3 Implement RDMA Read request and response sequencing for RC QPs.
-- [x] 9.4 Implement RDMA Write and Send immediate-data handling.
-- [x] 9.5 Implement UD transmit path with AH lookup, DETH generation, Q_Key handling, and no connection state.
-- [x] 9.6 Implement UD receive path with DETH parsing, Q_Key validation, source QPN reporting, and failure counters.
-- [x] 9.7 Implement address handle table for destination MAC, IP, UDP port, GID-derived fields, and service level metadata.
-- [x] 9.8 Add transport tests for RC Send, RDMA Write, RDMA Read, UD Send, PSN errors, retries, RNR, immediate data, and Q_Key rejection.
+- [x] 9.2 实现 RC 接收侧 PSN 校验、重复/重放丢弃、gap NAK 生成、ACK 合并以及 RNR NAK 生成。
+- [x] 9.3 实现 RC QP 的 RDMA Read 请求与响应排序。
+- [x] 9.4 实现 RDMA Write 和 Send 的 immediate data 处理。
+- [x] 9.5 实现 UD 发送路径，包含 AH 查找、DETH 生成、Q_Key 处理，并且不引入连接状态。
+- [x] 9.6 实现 UD 接收路径，包含 DETH 解析、Q_Key 校验、源 QPN 上报以及失败计数器。
+- [x] 9.7 实现 address handle 表，保存目的 MAC、IP、UDP 端口、GID 派生字段以及 service level 元数据。
+- [x] 9.8 添加传输层测试，覆盖 RC Send、RDMA Write、RDMA Read、UD Send、PSN 错误、重试、RNR、immediate data 以及 Q_Key 拒绝。
 
-## 10. PFC ECN DCQCN and Scheduling
+## 10. PFC、ECN、DCQCN 与调度
 
-- [x] 10.1 Implement ECN detection from ingress packets and pass congestion marks to transport and congestion logic.
-- [x] 10.2 Implement CNP packet generation and CNP receive classification.
-- [x] 10.3 Implement DCQCN state machine with configurable alpha, rate decrease, rate recovery, target rate, and minimum rate.
-- [x] 10.4 Implement per-QP token bucket or equivalent transmit pacing.
-- [x] 10.5 Implement PFC pause handling for configured priority and transmit scheduler backpressure.
-- [x] 10.6 Add congestion tests for ECN-to-CNP, CNP rate update, rate recovery, pacing, PFC pause/resume, and malformed CNP handling.
+- [x] 10.1 实现入站数据包的 ECN 检测，并将拥塞标记传递给 transport 和 congestion 逻辑。
+- [x] 10.2 实现 CNP 数据包生成和 CNP 接收分类。
+- [x] 10.3 实现 DCQCN 状态机，支持可配置 alpha、速率降低、速率恢复、目标速率和最小速率。
+- [x] 10.4 实现 per-QP token bucket 或等价的发送 pacing。
+- [x] 10.5 实现配置优先级的 PFC pause 处理和发送调度器背压。
+- [x] 10.6 添加拥塞测试，覆盖 ECN-to-CNP、CNP 速率更新、速率恢复、pacing、PFC pause/resume 以及 malformed CNP 处理。
 
-## 11. Top-Level RTL Integration
+## 11. 顶层 RTL 集成
 
-- [x] 11.1 Implement `smartnic_top` with all major RTL blocks instantiated and connected through stable internal interfaces.
-- [x] 11.2 Connect PCIe BAR/CSR control path to QP, CQ, MR, AH, MSI-X, SR-IOV, and congestion-control registers.
-- [x] 11.3 Connect Doorbell path to QP SQ/RQ and CQ arm logic.
-- [x] 11.4 Connect QP, DMA, packet, transport, completion, and CQ managers for RC Send/Recv minimal loop.
-- [x] 11.5 Connect RDMA Write and RDMA Read datapaths.
-- [x] 11.6 Connect UD transmit and receive datapaths.
-- [x] 11.7 Add top-level tests for reset, CSR command, Doorbell-to-CQE minimal loop, RC Send, RDMA Write, RDMA Read, UD Send, and MSI-X completion interrupt.
+- [x] 11.1 实现 `smartnic_top`，实例化所有主要 RTL block，并通过稳定的内部接口连接。
+- [x] 11.2 将 PCIe BAR/CSR 控制路径连接到 QP、CQ、MR、AH、MSI-X、SR-IOV 和拥塞控制寄存器。
+- [x] 11.3 将 Doorbell 路径连接到 QP SQ/RQ 和 CQ arm 逻辑。
+- [x] 11.4 连接 QP、DMA、packet、transport、completion 和 CQ 管理器，形成 RC Send/Recv 最小环路。
+- [x] 11.5 连接 RDMA Write 和 RDMA Read 数据路径。
+- [x] 11.6 连接 UD 发送和接收数据路径。
+- [x] 11.7 添加顶层测试，覆盖 reset、CSR command、Doorbell-to-CQE 最小环路、RC Send、RDMA Write、RDMA Read、UD Send 以及 MSI-X completion interrupt。
 
-## 12. Linux Kernel Driver
+## 12. Linux 内核驱动
 
-- [x] 12.1 Implement PCIe driver probe/remove with BAR mapping, DMA mask setup, reset, feature discovery, and teardown.
-- [x] 12.2 Implement CSR mailbox helper with timeout, error-code mapping, and locking.
-- [x] 12.3 Implement character device open, release, ioctl dispatch, mmap, and poll operations.
-- [x] 12.4 Implement user-space library and CLI tool for SmartNIC driver control.
-- [x] 12.5 Implement driver interrupt support with MSI-X setup, ISR, event handling, and teardown.
-- [x] 12.6 Implement driver DMA buffer management for queues, descriptors, and user-visible rings.
-- [x] 12.7 Implement driver tests for probe/remove, mailbox, char device, ioctl, mmap, poll, MSI-X, and DMA buffer lifecycle.
-- [x] 12.8 Implement driver documentation, example usage, and troubleshooting notes.
-- [x] 12.9 Implement end-to-end driver integration tests and packaging checks.
-- [x] 12.10 Implement driver self-tests, error-path tests, and integration tests for PCIe probe/remove, CSR mailbox, character device ioctl/mmap/poll, DMA mapping, and interrupt handling.
-- [x] 12.11 Implement Linux SmartNIC driver documentation, UAPI description, usage examples, and debugging guide.
-- [x] 12.12 Finalize Linux SmartNIC driver integration with build, CI, cleanup, and release-readiness checks.
+- [x] 12.1 实现 PCIe 驱动 probe/remove，包含 BAR mapping、DMA mask 设置、reset、feature discovery 和 teardown。
+- [x] 12.2 实现 CSR mailbox helper，包含 timeout、错误码映射和 locking。
+- [x] 12.3 实现字符设备 open、release、ioctl 分发、mmap 和 poll 操作。
+- [x] 12.4 实现用于 SmartNIC 驱动控制的用户态库和 CLI 工具。
+- [x] 12.5 实现驱动中断支持，包含 MSI-X setup、ISR、事件处理和 teardown。
+- [x] 12.6 实现驱动 DMA buffer 管理，用于 queue、descriptor 和用户可见 ring。
+- [x] 12.7 实现驱动测试，覆盖 probe/remove、mailbox、char device、ioctl、mmap、poll、MSI-X 和 DMA buffer 生命周期。
+- [x] 12.8 编写驱动文档、示例用法和故障排查说明。
+- [x] 12.9 实现端到端驱动集成测试和 packaging 检查。
+- [x] 12.10 实现驱动 self-test、错误路径测试和集成测试，覆盖 PCIe probe/remove、CSR mailbox、字符设备 ioctl/mmap/poll、DMA mapping 和中断处理。
+- [x] 12.11 编写 Linux SmartNIC 驱动文档、UAPI 说明、使用示例和调试指南。
+- [x] 12.12 完成 Linux SmartNIC 驱动集成收尾，包含构建、CI、清理和发布就绪检查。
 
-## 13. Userspace Verbs Library
+## 13. 用户态 Verbs 库
 
-- [x] 13.1 Implement device discovery and context open/close APIs.
-- [x] 13.2 Implement query_device, query_port, query_gid, and query_pkey APIs.
-- [x] 13.3 Implement PD alloc/dealloc APIs.
-- [x] 13.4 Implement CQ create/destroy/resize, poll_cq, and req_notify_cq APIs.
-- [x] 13.5 Implement QP create/modify/query/destroy APIs.
-- [x] 13.6 Implement MR register/deregister APIs.
-- [x] 13.7 Implement AH create/destroy APIs for UD.
-- [x] 13.8 Implement WQE builders for Send, Send with Immediate, RDMA Write, RDMA Write with Immediate, RDMA Read, and supported UD operations.
-- [x] 13.9 Implement post_send and post_recv batching with Doorbell memory barriers.
-- [x] 13.10 Implement CQE parser that returns Verbs-compatible work completions.
-- [x] 13.11 Implement async event retrieval and acknowledgement APIs.
-- [x] 13.12 Add pkg-config, provider metadata, examples, and userspace unit tests.
+- [x] 13.1 实现设备发现和 context open/close API。
+- [x] 13.2 实现 query_device、query_port、query_gid 和 query_pkey API。
+- [x] 13.3 实现 PD alloc/dealloc API。
+- [x] 13.4 实现 CQ create/destroy/resize、poll_cq 和 req_notify_cq API。
+- [x] 13.5 实现 QP create/modify/query/destroy API。
+- [x] 13.6 实现 MR register/deregister API。
+- [x] 13.7 实现用于 UD 的 AH create/destroy API。
+- [x] 13.8 实现 WQE builder，支持 Send、Send with Immediate、RDMA Write、RDMA Write with Immediate、RDMA Read 以及已支持的 UD 操作。
+- [x] 13.9 实现 post_send 和 post_recv 批量提交，并加入 Doorbell memory barrier。
+- [x] 13.10 实现 CQE parser，返回 Verbs-compatible work completion。
+- [x] 13.11 实现 async event retrieval 和 acknowledgement API。
+- [x] 13.12 添加 pkg-config、provider metadata、examples 和用户态单元测试。
 
-## 14. Cocotb Verilator Verification
+## 14. Cocotb/Verilator 验证
 
-- [x] 14.1 Implement PCIe BFM for config, memory read/write, completions, MSI-X, and function identity.
-- [x] 14.2 Implement Ethernet/RoCEv2 BFM for packet construction, parsing, error injection, and CNP/PFC stimuli.
-- [x] 14.3 Implement host memory model with DMA read/write visibility and data integrity checks.
-- [x] 14.4 Implement scoreboard for WR-to-CQE matching, payload comparison, PSN tracking, retry behavior, and error statuses.
-- [x] 14.5 Implement functional coverage for opcodes, QP states, CQ statuses, MR permissions, message sizes, SGE counts, QP types, and congestion events.
-- [x] 14.6 Implement module-level Cocotb tests for PCIe, Doorbell, QP, CQ, MR, DMA, packet, transport, congestion, and top-level reset.
-- [x] 14.7 Implement integration tests for Doorbell-to-CQE, RC Send, RDMA Write, RDMA Read, UD Send, MSI-X, and SR-IOV isolation.
-- [x] 14.8 Implement protocol compliance tests for RoCEv2 header fields, ACK/NAK, RNR, immediate data, invalid packets, and ICRC behavior.
-- [x] 14.9 Implement regression script that runs lint, unit tests, integration tests, compatibility simulations, and coverage report generation.
+- [x] 14.1 实现 PCIe BFM，覆盖 config、memory read/write、completion、MSI-X 和 function identity。
+- [x] 14.2 实现 Ethernet/RoCEv2 BFM，用于 packet 构造、解析、错误注入以及 CNP/PFC 激励。
+- [x] 14.3 实现 host memory model，支持 DMA read/write 可见性和数据完整性检查。
+- [x] 14.4 实现 scoreboard，用于 WR-to-CQE 匹配、payload 比较、PSN 跟踪、重试行为和错误状态检查。
+- [x] 14.5 实现 functional coverage，覆盖 opcode、QP state、CQ status、MR permission、message size、SGE count、QP type 和 congestion event。
+- [x] 14.6 实现模块级 Cocotb 测试，覆盖 PCIe、Doorbell、QP、CQ、MR、DMA、packet、transport、congestion 和顶层 reset。
+- [x] 14.7 实现集成测试，覆盖 Doorbell-to-CQE、RC Send、RDMA Write、RDMA Read、UD Send、MSI-X 和 SR-IOV 隔离。
+- [x] 14.8 实现协议一致性测试，覆盖 RoCEv2 header field、ACK/NAK、RNR、immediate data、invalid packet 和 ICRC 行为。
+- [x] 14.9 实现 regression script，用于运行 lint、单元测试、集成测试、兼容性仿真和覆盖率报告生成。
 
-## 15. Compatibility and Performance Validation
+## 15. 兼容性与性能验证
 
-- [x] 15.1 Add a minimal verbs example that opens the device, creates PD/CQ/QP/MR, posts Send/Recv, and polls completions.
-- [x] 15.2 Add perftest compatibility target for supported RC Send, RDMA Write, and RDMA Read tests.
-- [x] 15.3 Add UCX compatibility smoke tests for supported RC operations.
-- [x] 15.4 Add libfabric compatibility smoke tests for supported verbs-backed operations.
-- [x] 15.5 Add simulation performance counters for Doorbell-to-CQE latency, Doorbell-to-wire latency, DMA bandwidth, packet rate, and completion rate.
-- [x] 15.6 Add FPGA prototype checklist for board selection, PCIe IP wrapper, MAC IP wrapper, clocks, resets, constraints, loopback, and host driver loading.
+- [x] 15.1 添加最小 verbs 示例，打开设备、创建 PD/CQ/QP/MR、post Send/Recv，并轮询 completion。
+- [x] 15.2 添加 perftest 兼容性目标，用于支持的 RC Send、RDMA Write 和 RDMA Read 测试。
+- [x] 15.3 添加 UCX 兼容性 smoke test，用于支持的 RC 操作。
+- [x] 15.4 添加 libfabric 兼容性 smoke test，用于支持的 verbs-backed 操作。
+- [x] 15.5 添加仿真性能计数器，覆盖 Doorbell-to-CQE latency、Doorbell-to-wire latency、DMA bandwidth、packet rate 和 completion rate。
+- [x] 15.6 添加 FPGA 原型 checklist，覆盖 board selection、PCIe IP wrapper、MAC IP wrapper、clocks、resets、constraints、loopback 和 host driver loading。
 
-## 16. Documentation and Acceptance
+## 16. 文档与验收
 
-- [x] 16.1 Document hardware module architecture and top-level data paths.
-- [x] 16.2 Document Linux driver ioctl ABI, mmap offsets, resource lifecycle, and error codes.
-- [x] 16.3 Document userspace Verbs API compatibility scope and known limitations.
-- [x] 16.4 Document verification strategy, test matrix, coverage goals, and how to run regression.
-- [x] 16.5 Verify `openspec validate add-rdma-smartnic-design-capability --strict` passes.
-- [x] 16.6 Verify all generated OpenSpec artifacts are ready for `/opsx:apply`.
+- [x] 16.1 编写硬件模块架构和顶层数据路径文档。
+- [x] 16.2 编写 Linux driver ioctl ABI、mmap offset、资源生命周期和错误码文档。
+- [x] 16.3 编写用户态 Verbs API 兼容性范围和已知限制文档。
+- [x] 16.4 编写验证策略、测试矩阵、覆盖率目标和回归运行方式文档。
+- [x] 16.5 验证 `openspec validate add-rdma-smartnic-design-capability --strict` 通过。
+- [x] 16.6 验证所有生成的 OpenSpec artifact 已准备好用于 `/opsx:apply`。
