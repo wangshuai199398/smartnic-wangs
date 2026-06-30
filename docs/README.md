@@ -25,6 +25,11 @@
 | 17 | 17-dma-engine.md | 7 | DMA 引擎：调度、WQE/SGE fetch、SGE 遍历、MR 集成、host read 路径 |
 | 18 | 18-data-path.md | 综合 | 端到端数据通路走读（RDMA Write 全程） |
 | 19 | 19-build-and-test.md | 1.6 | 构建目标、仿真运行、回归测试 |
+| 20 | 20-packet-parser.md | 8 | RoCEv2 packet parser、validator、payload extractor 和 ICRC 边界 |
+| 21 | 21-transport-engine.md | 9 | RC/UD transport、PSN、ACK/NAK、immediate data、AH/Q_Key |
+| 22 | 22-congestion-control.md | 10 | ECN、CNP、DCQCN、token bucket pacing 和 PFC pause |
+| 23 | 23-top-level-integration.md | 11 | smartnic_top、CSR、Doorbell、RC/RDMA/UD 顶层集成 |
+| 24 | 24-fpga-prototype-checklist.md | 15.6 | FPGA 原型 bring-up 清单：board、PCIe/MAC IP、clock/reset、constraints、loopback、driver loading |
 
 ## 🗺️ 架构总览
 

@@ -28,6 +28,7 @@ Groups:
   integration   Run 14.7 RDMA/RoCE integration tests.
   protocol      Run 14.8 protocol compliance tests.
   compatibility Run available driver/userspace compatibility smoke checks.
+  perf          Run optional simulation performance counter smoke checks.
   coverage      Generate a lightweight coverage summary from existing coverage tests.
   smoke         Run lint, unit, integration, protocol, and coverage.
   full          Run lint, unit, module, integration, protocol, compatibility, and coverage.
@@ -40,6 +41,8 @@ Options:
 
 Environment:
   RDMA_REGRESSION_OUT  Override output directory.
+  RDMA_REGRESSION_ENABLE_PERF=1
+                       Add perf counters to smoke/full group expansion.
   SIM                  Default simulator when --sim is not provided.
 USAGE
 }
@@ -62,7 +65,7 @@ while [ "$#" -gt 0 ]; do
             usage
             exit 0
             ;;
-        smoke|full|lint|unit|module|integration|protocol|compatibility|coverage)
+        smoke|full|lint|unit|module|integration|protocol|compatibility|perf|coverage)
             REQUESTED_GROUPS+=("$1")
             shift
             ;;
@@ -140,9 +143,15 @@ expand_groups() {
         case "${group}" in
             smoke)
                 expanded+=(lint unit integration protocol coverage)
+                if [ "${RDMA_REGRESSION_ENABLE_PERF:-0}" = "1" ]; then
+                    expanded+=(perf)
+                fi
                 ;;
             full)
                 expanded+=(lint unit module integration protocol compatibility coverage)
+                if [ "${RDMA_REGRESSION_ENABLE_PERF:-0}" = "1" ]; then
+                    expanded+=(perf)
+                fi
                 ;;
             *)
                 expanded+=("${group}")
@@ -199,6 +208,28 @@ run_compatibility_group() {
     else
         skip_step "compatibility: provider static tests" "provider static test not found"
     fi
+
+    if have_file "tests/run_perftest_compat.sh"; then
+        run_step "compatibility: perftest RC smoke" bash tests/run_perftest_compat.sh
+    else
+        skip_step "compatibility: perftest RC smoke" "tests/run_perftest_compat.sh not found"
+    fi
+
+    if have_file "tests/run_ucx_compat.sh"; then
+        run_step "compatibility: UCX RC smoke" bash tests/run_ucx_compat.sh
+    else
+        skip_step "compatibility: UCX RC smoke" "tests/run_ucx_compat.sh not found"
+    fi
+
+    if have_file "tests/run_libfabric_compat.sh"; then
+        run_step "compatibility: libfabric verbs smoke" bash tests/run_libfabric_compat.sh
+    else
+        skip_step "compatibility: libfabric verbs smoke" "tests/run_libfabric_compat.sh not found"
+    fi
+}
+
+run_perf_group() {
+    run_step "perf: simulation performance counters" make sim-perf-counters
 }
 
 run_coverage_group() {
@@ -237,6 +268,7 @@ for group in "${SELECTED_GROUPS[@]}"; do
         integration) run_integration_group ;;
         protocol) run_protocol_group ;;
         compatibility) run_compatibility_group ;;
+        perf) run_perf_group ;;
         coverage) run_coverage_group ;;
         *) skip_step "${group}" "unknown group" ;;
     esac

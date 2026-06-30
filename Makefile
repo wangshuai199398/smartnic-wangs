@@ -1,7 +1,7 @@
 # RDMA SmartNIC 顶层构建入口。
 # 当前阶段只提供可执行的占位目标，用来固定后续 RTL、驱动、用户态库和验证环境的统一入口。
 
-.PHONY: all lint verilator cocotb module-test integration-test protocol-test pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-static-check driver-integration-test driver-release-check userspace regression coverage clean
+.PHONY: all lint verilator cocotb module-test integration-test protocol-test pcie-test doorbell-test qp-test cq-test mr-test dma-test packet-test transport-test congestion-test top-test driver driver-static-check driver-integration-test driver-release-check userspace compat-perftest perftest compat-ucx ucx compat-libfabric libfabric sim-perf-counters perf-counters smoke-perf-counters regression coverage clean
 
 all: lint driver userspace
 
@@ -98,6 +98,32 @@ userspace:
 	@$(MAKE) -C lib/libsmartnic
 	@echo "[userspace] 构建 smartnicctl 用户态控制工具。"
 	@$(MAKE) -C tools
+
+compat-perftest:
+	@echo "[compat-perftest] 运行 perftest RC Send/RDMA Write/RDMA Read 兼容性 smoke。"
+	@bash tests/run_perftest_compat.sh
+
+perftest: compat-perftest
+
+compat-ucx:
+	@echo "[compat-ucx] 运行 UCX RC Send/RDMA Write/RDMA Read 兼容性 smoke。"
+	@bash tests/run_ucx_compat.sh
+
+ucx: compat-ucx
+
+compat-libfabric:
+	@echo "[compat-libfabric] 运行 libfabric verbs-backed Send/RDMA Write/RDMA Read 兼容性 smoke。"
+	@bash tests/run_libfabric_compat.sh
+
+libfabric: compat-libfabric
+
+sim-perf-counters:
+	@echo "[sim-perf-counters] 运行仿真性能计数器 smoke。"
+	@$(MAKE) -C sim/cocotb sim-perf-counters
+
+perf-counters: sim-perf-counters
+
+smoke-perf-counters: sim-perf-counters
 
 regression:
 	@echo "[regression] 运行 14.9 RDMA 验证回归入口。"

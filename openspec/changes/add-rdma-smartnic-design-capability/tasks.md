@@ -153,11 +153,11 @@
 ## 15. Compatibility and Performance Validation
 
 - [x] 15.1 Add a minimal verbs example that opens the device, creates PD/CQ/QP/MR, posts Send/Recv, and polls completions.
-- [ ] 15.2 Add perftest compatibility target for supported RC Send, RDMA Write, and RDMA Read tests.
-- [ ] 15.3 Add UCX compatibility smoke tests for supported RC operations.
-- [ ] 15.4 Add libfabric compatibility smoke tests for supported verbs-backed operations.
-- [ ] 15.5 Add simulation performance counters for Doorbell-to-CQE latency, Doorbell-to-wire latency, DMA bandwidth, packet rate, and completion rate.
-- [ ] 15.6 Add FPGA prototype checklist for board selection, PCIe IP wrapper, MAC IP wrapper, clocks, resets, constraints, loopback, and host driver loading.
+- [x] 15.2 Add perftest compatibility target for supported RC Send, RDMA Write, and RDMA Read tests.
+- [x] 15.3 Add UCX compatibility smoke tests for supported RC operations.
+- [x] 15.4 Add libfabric compatibility smoke tests for supported verbs-backed operations.
+- [x] 15.5 Add simulation performance counters for Doorbell-to-CQE latency, Doorbell-to-wire latency, DMA bandwidth, packet rate, and completion rate.
+- [x] 15.6 Add FPGA prototype checklist for board selection, PCIe IP wrapper, MAC IP wrapper, clocks, resets, constraints, loopback, and host driver loading.
 
 ## 16. Documentation and Acceptance
 

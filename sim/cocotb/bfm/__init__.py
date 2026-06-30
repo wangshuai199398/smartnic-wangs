@@ -47,6 +47,12 @@ from .rdma_coverage import (
     RdmaCoverageCollector,
     SgeCountBin,
 )
+from .performance_counters import (
+    LatencyStats,
+    PerformanceCounterError,
+    RateCounter,
+    SimulationPerformanceCounters,
+)
 
 __all__ = [
     "CompletionStatus",
@@ -66,6 +72,7 @@ __all__ = [
     "ObservedCqe",
     "PacketObservation",
     "PatternKind",
+    "PerformanceCounterError",
     "ParsedRoceFrame",
     "PcieBar",
     "PcieCompletion",
@@ -76,6 +83,7 @@ __all__ = [
     "PcieTlp",
     "QpType",
     "QpState",
+    "RateCounter",
     "RdmaCoverageCollector",
     "RdmaScoreboard",
     "RoceBfmError",
@@ -84,5 +92,7 @@ __all__ = [
     "ScoreboardError",
     "SgeRef",
     "SgeCountBin",
+    "SimulationPerformanceCounters",
     "WrOpcode",
+    "LatencyStats",
 ]
