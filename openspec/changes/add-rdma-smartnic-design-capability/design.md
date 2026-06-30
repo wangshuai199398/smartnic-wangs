@@ -356,6 +356,65 @@ Fast-path rules:
 4. 兼容性测试：使用用户态示例程序、perftest、UCX 和 libfabric（在仿真/原型环境允许的情况下）
 5. 性能测试：Doorbell 到 CQE 延迟、Doorbell 到线缆延迟、DMA 带宽、数据包速率、完成速率和中断调节行为
 
+## Verification Strategy
+
+16.4 的验收重点是确认本 OpenSpec change 本身可验证、可应用、可回归，而不是重新实现 RTL、driver、provider 或 Cocotb 测试。验证分为自动检查和人工审查两层：
+
+- **自动检查**：使用 OpenSpec strict validation 确认 change 目录、delta spec、design 和 tasks 的结构合法；使用仓库已有 Makefile 或 regression script 入口确认已生成的测试/文档/实现可以被统一调度。
+- **人工审查**：检查 `proposal.md`、`design.md`、`specs/rdma-smartnic/spec.md` 和 `tasks.md` 是否互相一致；确认所有 `MUST` / `SHALL` requirement 都至少能追溯到一个任务、文档或测试路径；确认本 change 没有引入无关 OpenSpec change 或超出 16.x 文档验收范围的实现修改。
+- **回归就绪**：`/opsx:apply` 前必须能复现 strict validation 命令；如果需要实现级回归，应使用已有 `make` / `tests/run_rdma_regression.sh` 入口，而不是为本 checklist 发明新的临时命令。
+
+### Test Strategy and Regression Matrix
+
+| Area | Scenario | Check / Command | Expected result | Coverage type |
+| --- | --- | --- | --- | --- |
+| OpenSpec strict validation | 验证 `add-rdma-smartnic-design-capability` 的 schema、required sections、delta spec 和 task 格式 | `openspec validate add-rdma-smartnic-design-capability --strict` | 命令返回 0，输出 change valid | Automated |
+| Required artifact presence | 确认 change 内存在 `proposal.md`、`design.md`、`tasks.md` 和 `specs/rdma-smartnic/spec.md` | `find openspec/changes/add-rdma-smartnic-design-capability -maxdepth 3 -type f | sort`，人工对照必需文件 | 所有必需 artifact 存在，且路径稳定 | Manual review |
+| Generated spec/delta completeness | 确认 `specs/rdma-smartnic/spec.md` 覆盖本 change 引入的 RDMA SmartNIC capability | 人工审查 `openspec/changes/add-rdma-smartnic-design-capability/specs/rdma-smartnic/spec.md` | 每个新增 requirement 都有清晰 scenario，且没有空洞占位 | Manual review |
+| RDMA SmartNIC capability requirements | 覆盖 PCIe、RoCEv2、RDMA ops、DMA、QP/CQ/MR、Doorbell、congestion、driver、userspace、verification capability | 人工 trace `spec.md` requirements 到 `tasks.md` 阶段和 `docs/` 产物 | 每个 `SHALL` 都能追溯到实现任务、测试任务或文档验收路径 | Manual review |
+| Negative / malformed spec case | 仓库当前没有提交级 malformed-spec fixture；可在本地临时 scratch copy 中制造缺失 scenario 或非法 heading 进行 sanity check | 不提交临时破坏；如需验证，临时修改 scratch 后运行 `openspec validate add-rdma-smartnic-design-capability --strict` | malformed copy 应失败；正式工作树必须恢复并通过 strict validation | Optional manual |
+| Regression against existing OpenSpec changes/specs | 确认本 change 没有破坏 OpenSpec CLI 对当前 change 的解析，也没有要求其他 change 一起修改 | `openspec instructions apply --change add-rdma-smartnic-design-capability --json` | JSON 可解析，progress/task 状态正确，剩余任务清晰 | Automated |
+| `/opsx:apply` readiness | 确认 task checklist、上下文文件和 apply instructions 能被执行代理消费 | `openspec instructions apply --change add-rdma-smartnic-design-capability --json`，人工确认 contextFiles 包含 proposal/spec/design/tasks | state 为 ready 或 all_done；contextFiles 指向真实文件；16.x 完成状态准确 | Automated + manual |
+| Implementation smoke regression | 对已生成 RTL/driver/provider/verification 入口做快速冒烟，避免文档验收掩盖明显脚本断裂 | `tests/run_rdma_regression.sh --mode smoke` 或 `make regression` | 在具备本地依赖的环境中通过；硬件依赖项应按脚本规则 skip | Automated when available |
+| Coverage report entry | 验证功能覆盖率报告入口仍可调度 | `make coverage` | 生成或报告现有覆盖率入口；无未配置工具时应清晰说明 | Automated when available |
+
+### Coverage Goals
+
+- 100% 的 OpenSpec change artifact 存在并可由 `openspec instructions apply --change add-rdma-smartnic-design-capability --json` 引用。
+- 100% 的 changed OpenSpec files 必须通过 `openspec validate add-rdma-smartnic-design-capability --strict`。
+- 所有 `MUST` / `SHALL` requirement 至少有一条 verification path：自动测试、回归入口、静态文档检查、compatibility runner 或人工审查项。
+- 所有 tasks.md 中标记完成的 1.x 到 16.x 项目必须有对应源码、测试、文档或明确的 stub/限制说明。
+- 不引入无关 OpenSpec change，不 archive 本 change，不修改第 16 阶段之后的内容。
+- 回归命令必须可复制粘贴执行；硬件依赖、外部工具依赖或可选 simulator 依赖必须由脚本 skip 或文档说明。
+- `/opsx:apply` readiness 以 apply instructions JSON 可解析、contextFiles 完整、remaining tasks 与 checklist 一致为准。
+
+### How To Run Regression
+
+最小 OpenSpec gate：
+
+```bash
+openspec validate add-rdma-smartnic-design-capability --strict
+```
+
+查看 `/opsx:apply` 上下文和剩余任务：
+
+```bash
+openspec instructions apply --change add-rdma-smartnic-design-capability --json
+```
+
+当前 OpenSpec CLI 没有独立的 apply dry-run/preview 子命令；`openspec apply --help` 只显示通用 CLI help。因此 `/opsx:apply` readiness 以 artifact audit、strict validation 和 `openspec instructions apply --change ... --json` 可解析为准。
+
+仓库已有实现级回归入口：
+
+```bash
+tests/run_rdma_regression.sh --mode smoke
+tests/run_rdma_regression.sh --mode full
+make regression
+make coverage
+```
+
+如果当前环境没有 simulator、kernel headers、perftest、UCX、libfabric 或 SmartNIC 硬件，相关脚本应按各自文档 skip 硬件/工具依赖项。对于 16.4 的 OpenSpec 验收，`openspec validate add-rdma-smartnic-design-capability --strict` 是必须通过的 regression gate；实现级 smoke/full regression 是推荐的附加检查。
+
 ## 设计决策
 
 ### D1：分层 RTL 架构
@@ -442,7 +501,9 @@ PF/VF 所有权必须在硬件可见的资源表中记录，并在 CSR、Doorbel
 
 实现变更的回滚策略按里程碑执行：每个里程碑必须保持其测试通过才能进入下一个里程碑。如果某个里程碑失败，回滚或仅禁用该里程碑的新集成，同时保持低层模块测试不受影响。
 
-## 待解决问题
+## 后续原型决策（非阻塞）
+
+以下条目是 FPGA 原型、供应商 IP 选择和规模参数的后续工程决策，不阻塞本 OpenSpec change 的 `/opsx:apply` readiness。当前 change 的 capability、delta spec、任务清单和验收文档已足以执行 apply；这些决策应在后续板级 bring-up 或实现细化 change 中收敛。
 
 - ~~首个 FPGA 原型目标板卡：Xilinx Alveo、Intel Agilex 还是其他平台？~~ → **已决定：Xilinx VCU118（Virtex UltraScale+ XCVU9P）**
 - FPGA 原型构建中 100GbE MAC 和 PCIe 端点 IP 封装应使用哪个？

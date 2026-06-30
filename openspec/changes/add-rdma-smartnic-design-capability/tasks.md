@@ -161,9 +161,9 @@
 
 ## 16. Documentation and Acceptance
 
-- [ ] 16.1 Document hardware module architecture and top-level data paths.
-- [ ] 16.2 Document Linux driver ioctl ABI, mmap offsets, resource lifecycle, and error codes.
-- [ ] 16.3 Document userspace Verbs API compatibility scope and known limitations.
-- [ ] 16.4 Document verification strategy, test matrix, coverage goals, and how to run regression.
-- [ ] 16.5 Verify `openspec validate add-rdma-smartnic-design-capability --strict` passes.
-- [ ] 16.6 Verify all generated OpenSpec artifacts are ready for `/opsx:apply`.
+- [x] 16.1 Document hardware module architecture and top-level data paths.
+- [x] 16.2 Document Linux driver ioctl ABI, mmap offsets, resource lifecycle, and error codes.
+- [x] 16.3 Document userspace Verbs API compatibility scope and known limitations.
+- [x] 16.4 Document verification strategy, test matrix, coverage goals, and how to run regression.
+- [x] 16.5 Verify `openspec validate add-rdma-smartnic-design-capability --strict` passes.
+- [x] 16.6 Verify all generated OpenSpec artifacts are ready for `/opsx:apply`.

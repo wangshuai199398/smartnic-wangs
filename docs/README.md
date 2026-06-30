@@ -30,6 +30,9 @@
 | 22 | 22-congestion-control.md | 10 | ECN、CNP、DCQCN、token bucket pacing 和 PFC pause |
 | 23 | 23-top-level-integration.md | 11 | smartnic_top、CSR、Doorbell、RC/RDMA/UD 顶层集成 |
 | 24 | 24-fpga-prototype-checklist.md | 15.6 | FPGA 原型 bring-up 清单：board、PCIe/MAC IP、clock/reset、constraints、loopback、driver loading |
+| 25 | 25-hardware-module-architecture.md | 16.1 | 硬件模块架构和顶层数据路径总览 |
+| 26 | 26-linux-driver-abi.md | 16.2 | Linux driver ioctl ABI、mmap offsets、资源生命周期和错误码 |
+| 27 | 27-userspace-verbs-compatibility.md | 16.3 | 用户态 Verbs/provider 兼容性范围、支持矩阵和已知限制 |
 
 ## 🗺️ 架构总览
 

@@ -67,7 +67,6 @@ def test_task_15_6_is_marked_complete() -> None:
     tasks = read("openspec/changes/add-rdma-smartnic-design-capability/tasks.md")
 
     assert "- [x] 15.6 Add FPGA prototype checklist" in tasks
-    assert "- [ ] 16.1 Document hardware module architecture" in tasks
 
 
 def run_all() -> None:
