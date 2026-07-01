@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Register and PCI identity definitions for the prototype RDMA SmartNIC
- * Linux driver.
+ * 原型 RDMA SmartNIC Linux 驱动使用的寄存器和 PCI 身份定义。
  */
 
 #ifndef _SMARTNIC_REGS_H
@@ -15,10 +14,10 @@
 #define SMARTNIC_PCI_DEVICE_ID         0x5a10
 
 /*
- * 12.1 keeps the software side conservative: BAR0 is mapped as the
- * primary control/MMIO aperture requested by the task, and BAR2 is mapped
- * opportunistically as a secondary doorbell/MMIO aperture. Later ioctl/mmap
- * work can tighten this to the hardware ABI's BAR0 Doorbell + BAR2 CSR split.
+ * 12.1 阶段的软件侧保持保守设计：BAR0 按任务要求映射为主
+ * control/MMIO 窗口，BAR2 则在存在时映射为辅助 doorbell/MMIO 窗口。
+ * 后续 ioctl/mmap 工作可以根据硬件 ABI，将这里收紧为 BAR0 Doorbell
+ * 加 BAR2 CSR 的划分。
  */
 #define SMARTNIC_BAR_CONTROL           0
 #define SMARTNIC_BAR_DOORBELL          2

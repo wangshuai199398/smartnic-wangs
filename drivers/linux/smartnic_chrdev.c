@@ -35,6 +35,13 @@ static struct class *smartnic_class;
 static unsigned int smartnic_class_users;
 static atomic_t smartnic_chrdev_next_index = ATOMIC_INIT(0);
 
+/**
+ * smartnic_chrdev_check_ready() - 检查字符设备是否可以处理用户请求。
+ * @sdev: SmartNIC 设备实例。
+ *
+ * 设备可用时返回 0；设备已移除或正在静默时返回 -ENODEV；
+ * 复位正在进行时返回 -EAGAIN。
+ */
 static int smartnic_chrdev_check_ready(struct smartnic_dev *sdev)
 {
 	int err = 0;
@@ -50,6 +57,14 @@ static int smartnic_chrdev_check_ready(struct smartnic_dev *sdev)
 	return err;
 }
 
+/**
+ * smartnic_chrdev_poll_mask() - 将设备状态转换为 poll(2) 就绪掩码。
+ * @state: 当前设备状态。
+ * @reset_active: 复位正在进行时为 true。
+ * @event_pending: 存在待用户态处理的中断或事件时为 true。
+ *
+ * 返回上报给用户态的 poll 掩码。
+ */
 __poll_t smartnic_chrdev_poll_mask(enum smartnic_dev_state state,
 				   bool reset_active, bool event_pending)
 {
@@ -67,6 +82,13 @@ __poll_t smartnic_chrdev_poll_mask(enum smartnic_dev_state state,
 	return mask;
 }
 
+/**
+ * smartnic_chrdev_open() - 打开 /dev/smartnicX 并分配每文件状态。
+ * @inode: 字符设备 inode。
+ * @filp: 接收私有上下文的文件对象。
+ *
+ * 成功返回 0，失败返回负 errno。
+ */
 static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 {
 	struct smartnic_dev *sdev;
@@ -89,6 +111,13 @@ static int smartnic_chrdev_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+/**
+ * smartnic_chrdev_release() - 释放每文件状态及其拥有的队列。
+ * @inode: 字符设备 inode。
+ * @filp: 持有私有上下文的文件对象。
+ *
+ * 返回 0；剩余的每文件资源会在 release 阶段销毁。
+ */
 static int smartnic_chrdev_release(struct inode *inode, struct file *filp)
 {
 	struct smartnic_file *ctx = filp->private_data;
@@ -108,6 +137,16 @@ static int smartnic_chrdev_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+/**
+ * smartnic_ioctl_mbox_exec() - 执行一条用户态 CSR mailbox 命令。
+ * @sdev: SmartNIC 设备实例。
+ * @arg: 指向 struct smartnic_ioctl_mbox 的用户态指针。
+ *
+ * 从用户态拷贝请求，校验 UAPI 结构体，执行 mailbox 命令，并在成功后
+ * 将命令输出拷贝回用户态。
+ *
+ * 成功返回 0，失败返回负 errno。
+ */
 static long smartnic_ioctl_mbox_exec(struct smartnic_dev *sdev,
 				     unsigned long arg)
 {
@@ -136,6 +175,14 @@ static long smartnic_ioctl_mbox_exec(struct smartnic_dev *sdev,
 	return 0;
 }
 
+/**
+ * smartnic_chrdev_ioctl() - 分发 SmartNIC 字符设备 ioctl。
+ * @filp: 包含每文件 SmartNIC 上下文的文件对象。
+ * @cmd: ioctl 命令号。
+ * @arg: 用户态 ioctl 参数。
+ *
+ * 成功返回 0 或命令特定返回值，失败返回负 errno。
+ */
 static long smartnic_chrdev_ioctl(struct file *filp, unsigned int cmd,
 				  unsigned long arg)
 {
@@ -168,6 +215,16 @@ static long smartnic_chrdev_ioctl(struct file *filp, unsigned int cmd,
 }
 
 #ifdef CONFIG_COMPAT
+/**
+ * smartnic_chrdev_compat_ioctl() - compat ioctl 转发入口。
+ * @filp: 包含每文件 SmartNIC 上下文的文件对象。
+ * @cmd: ioctl 命令号。
+ * @arg: compat 用户态 ioctl 参数。
+ *
+ * UAPI 结构体使用固定宽度字段，因此 compat 分发可以复用原生 ioctl 实现。
+ *
+ * 返回原生 ioctl 的执行结果。
+ */
 static long smartnic_chrdev_compat_ioctl(struct file *filp, unsigned int cmd,
 					 unsigned long arg)
 {
@@ -175,6 +232,16 @@ static long smartnic_chrdev_compat_ioctl(struct file *filp, unsigned int cmd,
 }
 #endif
 
+/**
+ * smartnic_chrdev_mmap() - 映射 doorbell/MMIO 或队列 ring 内存。
+ * @filp: 包含每文件 SmartNIC 上下文的文件对象。
+ * @vma: 用户态请求的 VMA。
+ *
+ * 队列 mmap 偏移交给队列层处理。其他已批准的偏移会将 doorbell BAR
+ * 窗口映射为不可缓存的 I/O 内存。
+ *
+ * 成功返回 0，失败返回负 errno。
+ */
 static int smartnic_chrdev_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	struct smartnic_file *ctx = filp->private_data;
@@ -219,6 +286,13 @@ static int smartnic_chrdev_mmap(struct file *filp, struct vm_area_struct *vma)
 	return err;
 }
 
+/**
+ * smartnic_chrdev_poll() - 向 poll(2) 上报事件和命令就绪状态。
+ * @filp: 包含每文件 SmartNIC 上下文的文件对象。
+ * @wait: poll 等待表。
+ *
+ * 返回由设备状态、复位状态和待处理事件状态推导出的 poll 掩码。
+ */
 static __poll_t smartnic_chrdev_poll(struct file *filp, poll_table *wait)
 {
 	struct smartnic_file *ctx = filp->private_data;
@@ -255,6 +329,13 @@ static const struct file_operations smartnic_fops = {
 	.llseek = no_llseek,
 };
 
+/**
+ * smartnic_chrdev_get_class() - 获取共享的 SmartNIC 设备 class。
+ *
+ * 首次使用时创建设备 class，并递增 class 使用计数。
+ *
+ * 成功返回 0，失败返回负 errno。
+ */
 static int smartnic_chrdev_get_class(void)
 {
 	int err = 0;
@@ -280,6 +361,11 @@ out_unlock:
 	return err;
 }
 
+/**
+ * smartnic_chrdev_put_class() - 释放共享 class 的一个引用。
+ *
+ * 当最后一个已注册的 SmartNIC 字符设备注销后，销毁该 class。
+ */
 static void smartnic_chrdev_put_class(void)
 {
 	mutex_lock(&smartnic_class_lock);
@@ -293,6 +379,15 @@ static void smartnic_chrdev_put_class(void)
 	mutex_unlock(&smartnic_class_lock);
 }
 
+/**
+ * smartnic_chrdev_register() - 为设备注册 /dev/smartnicX。
+ * @sdev: SmartNIC 设备实例。
+ *
+ * 分配字符设备号，按需创建共享 class，安装文件操作，并创建用户可见的
+ * 设备节点。
+ *
+ * 成功返回 0，失败返回负 errno。
+ */
 int smartnic_chrdev_register(struct smartnic_dev *sdev)
 {
 	int err;
@@ -336,6 +431,13 @@ err_unregister_region:
 	return err;
 }
 
+/**
+ * smartnic_chrdev_unregister() - 注销设备对应的 /dev/smartnicX。
+ * @sdev: SmartNIC 设备实例。
+ *
+ * 唤醒等待者，移除设备节点和 cdev，释放共享 class 引用，并等待所有
+ * 已打开的文件引用退出。
+ */
 void smartnic_chrdev_unregister(struct smartnic_dev *sdev)
 {
 	if (!sdev->chrdev_registered)
